@@ -37,11 +37,6 @@ Bot ini dirancang dengan arsitektur multi-user yang hemat sumber daya (RAM < 150
 - Pengaturan non-rahasia dipisahkan dari `.env` ke `config.json`.
 - Pengguna dapat mengaktifkan atau menonaktifkan fitur sinkronisasi WhatsApp, auto-download materi, auto-download tugas, dan interval polling hanya dengan mengubah nilai `true`/`false`.
 
-### 5. Keamanan & Privasi Tingkat Tinggi
-- **Enkripsi Kredensial**: Password akun PENS disimpan dengan enkripsi simetris Fernet (AES-128-CBC) di database lokal.
-- **Penghapusan Pesan Otomatis**: Pesan Telegram yang berisi password saat perintah `/login` dijalankan langsung dihapus secara otomatis dalam milidetik.
-- **Penyensoran Identitas**: Email dan nomor pengguna otomatis disensor pada pengumuman di WhatsApp untuk menjaga privasi.
-
 ---
 
 ## 📁 Struktur Direktori
