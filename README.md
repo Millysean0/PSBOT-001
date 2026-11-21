@@ -297,8 +297,4 @@ Ketik perintah langsung di chat pribadi bot WhatsApp atau di grup yang ditautkan
 
 ---
 
-## 🤝 Kontribusi & Lisensi
-
-Proyek ini dirilis untuk kepentingan edukasi, penelitian, dan kemudahan akademis mahasiswa. Bebas digunakan, dimodifikasi, dan dikembangkan lebih lanjut.
-
 *Disclaimer: Bot ini merupakan utilitas pihak ketiga independen yang memanfaatkan CAS SSO dan REST API resmi ETHOL PENS serta Looker Studio SKEM PENS. Pastikan penggunaan bot mematuhi tata tertib akademik kampus.*
