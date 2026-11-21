@@ -1,0 +1,12 @@
+# =============================================================================
+# PSBOT-001: Python Dependencies
+# =============================================================================
+python-telegram-bot[job-queue]>=21.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+cryptography>=42.0.0
+python-dotenv>=1.0.0
+apscheduler>=3.10.4
+playwright>=1.43.0
+pytz>=2024.1
+psutil>=5.9.0

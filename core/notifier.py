@@ -1,0 +1,510 @@
+"""Modul Notifier untuk memformat dan mengirim pesan ke Telegram dan WhatsApp.
+
+Format pesan dibuat rapi, humanis, dan mudah dibaca sesuai kebutuhan mahasiswa:
+- Absen dibuka: Menampilkan matkul, jam dibuka, dan minggu ke berapa.
+  Sertakan @all hanya jika notifikasi dikirim ke grup WhatsApp (bukan di chat pribadi).
+- Materi baru: Menampilkan matkul dan judul materi, serta otomatis mengunduh
+  dan mengirim file materi langsung ke Telegram dan WhatsApp.
+- Tugas baru: Menampilkan matkul, judul, deskripsi, dan otomatis mengunduh
+  dan mengirim file lampiran langsung ke Telegram dan WhatsApp.
+- Tugas dikumpulkan: Notifikasi tugas yang baru dikumpulkan beserta auto-download file jawaban.
+- SKEM monitor: Menampilkan detail ajuan diterima / ditolak dengan format humanis.
+"""
+
+from __future__ import annotations
+
+import html
+import io
+import json
+import logging
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+from telegram import Bot
+from telegram.constants import ParseMode
+from telegram.error import TelegramError
+
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
+
+
+class Notifier:
+    """Mengelola pengiriman pesan dan notifikasi ke Telegram dan WhatsApp."""
+
+    def __init__(
+        self,
+        bot: Bot,
+        db: Optional[Any] = None,
+        wa_client: Optional[Any] = None,
+        ethol_client: Optional[Any] = None,
+        config_path: str = "config.json",
+    ) -> None:
+        """Inisialisasi Notifier."""
+        self.bot = bot
+        self.db = db
+        self.wa_client = wa_client
+        self.ethol_client = ethol_client
+        self.config_path = config_path
+        self.global_sent_count: int = 0
+        self._load_features()
+
+    def _load_features(self) -> None:
+        """Memuat preferensi fitur dari config.json."""
+        self.features: Dict[str, Any] = {
+            "whatsapp_sync_enabled": True,
+            "auto_download_materi": True,
+            "auto_download_tugas": True,
+            "auto_download_submitted_task": True,
+        }
+        try:
+            if os.path.exists(self.config_path):
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    self.features.update(cfg.get("features", {}))
+        except Exception as exc:
+            logger.warning("Gagal memuat config features di Notifier: %s", exc)
+
+    @staticmethod
+    def split_message(text: str, max_length: int = 4000) -> List[str]:
+        """Memecah teks panjang menjadi beberapa bagian agar tidak melebihi batas pesan Telegram."""
+        if len(text) <= max_length:
+            return [text]
+
+        chunks: List[str] = []
+        lines = text.split("\n")
+        current_chunk = ""
+
+        for line in lines:
+            if len(current_chunk) + len(line) + 1 > max_length:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = ""
+                while len(line) > max_length:
+                    chunks.append(line[:max_length])
+                    line = line[max_length:]
+                current_chunk = line + "\n"
+            else:
+                current_chunk += line + "\n"
+
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+
+        return chunks
+
+    async def send_text(
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: str = ParseMode.HTML,
+        disable_web_page_preview: bool = True,
+    ) -> bool:
+        """Mengirim pesan teks ke chat_id target Telegram."""
+        chunks = self.split_message(text)
+        success = True
+
+        for chunk in chunks:
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview,
+                )
+                self.global_sent_count += 1
+            except TelegramError as exc:
+                logger.error("Gagal mengirim pesan Telegram ke %s: %s", chat_id, exc)
+                try:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk,
+                        disable_web_page_preview=disable_web_page_preview,
+                    )
+                    self.global_sent_count += 1
+                except Exception as inner_exc:
+                    logger.error("Fallback plain text Telegram gagal ke %s: %s", chat_id, inner_exc)
+                    success = False
+
+        return success
+
+    async def send_document(
+        self,
+        chat_id: int,
+        file_bytes: bytes,
+        filename: str,
+        caption: str = "",
+    ) -> bool:
+        """Mengirim file/dokumen ke Telegram chat_id."""
+        try:
+            await self.bot.send_document(
+                chat_id=chat_id,
+                document=io.BytesIO(file_bytes),
+                filename=filename,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+            self.global_sent_count += 1
+            return True
+        except TelegramError as exc:
+            logger.error("Gagal mengirim dokumen Telegram ke %s (%s): %s", chat_id, filename, exc)
+            return False
+
+    async def _send_to_whatsapp(self, user_id: int, message: str, is_absen: bool = False) -> None:
+        """Mengirim pesan announcement ke semua WhatsApp chat/grup yang tertaut ke user_id.
+
+        Aturan @all:
+        - Jika is_absen=True dan target adalah GRUP (@g.us), tambahkan @all.
+        - Jika target adalah CHAT PRIBADI (@s.whatsapp.net), jangan ada @all.
+        """
+        if not self.features.get("whatsapp_sync_enabled", True):
+            return
+
+        if not self.db or not self.wa_client:
+            return
+
+        wa_chats = self.db.get_user_whatsapp_chats(user_id)
+        if not wa_chats:
+            return
+
+        for chat in wa_chats:
+            chat_str = str(chat).strip()
+            is_group = chat_str.endswith("@g.us")
+
+            if is_absen:
+                if is_group:
+                    msg_to_send = message.rstrip()
+                    if "@all" not in msg_to_send:
+                        msg_to_send = f"{msg_to_send}\n\n@all"
+                else:
+                    msg_to_send = message.replace("@all", "").strip()
+            else:
+                msg_to_send = message.replace("@all", "").strip() if not is_group else message
+
+            try:
+                await self.wa_client.send_announcement(chat_str, msg_to_send)
+            except Exception as exc:
+                logger.error("Gagal broadcast WhatsApp ke %s: %s", chat_str, exc)
+
+    async def _send_file_to_whatsapp(
+        self,
+        user_id: int,
+        file_bytes: bytes,
+        filename: str,
+        caption: str = "",
+    ) -> None:
+        """Mengirim file/dokumen ke semua WhatsApp chat/grup yang tertaut ke user_id."""
+        if not self.features.get("whatsapp_sync_enabled", True):
+            return
+
+        if not self.db or not self.wa_client:
+            return
+
+        wa_chats = self.db.get_user_whatsapp_chats(user_id)
+        if not wa_chats:
+            return
+
+        for chat in wa_chats:
+            try:
+                await self.wa_client.send_file(chat, file_bytes, filename, caption)
+            except Exception as exc:
+                logger.error("Gagal kirim file WhatsApp ke %s: %s", chat, exc)
+
+    async def notify_item(
+        self,
+        chat_id: int,
+        item: Dict[str, Any],
+        is_priority: bool = False,
+        ethol_client: Optional[Any] = None,
+    ) -> bool:
+        """Memformat dan mengirim item notifikasi baru (tugas, materi, atau notifikasi ETHOL).
+
+        Format disesuaikan dengan New.txt:
+        - Absen dibuka !!!
+        - Materi baru ditambahkan !!!
+        - Tugas Baru ditambahkan !!!
+        """
+        client = ethol_client or self.ethol_client
+        category = item.get("category", "notifikasi").lower()
+        tg_msg = ""
+        wa_msg: Optional[str] = None
+        send_to_wa = False
+
+        if category == "tugas":
+            judul = item.get("judul", "-")
+            matkul = item.get("matkul", "-")
+            deskripsi = item.get("deskripsi", "").strip()
+            deadline = item.get("deadline", "")
+            files: List[Dict] = item.get("files", [])
+            link = item.get("link", "")
+
+            # Telegram (HTML)
+            tg_msg = (
+                "📝 <b>Tugas Baru ditambahkan !!!</b>\n\n"
+                f"<b>Matkul:</b> {html.escape(matkul)}\n"
+                f"<b>Judul:</b> {html.escape(judul)}\n"
+                f"<b>Deskripsi:</b>\n{html.escape(deskripsi) if deskripsi else '<i>(Tidak ada deskripsi tambahan)</i>'}"
+            )
+            if deadline and deadline != "-":
+                tg_msg += f"\n\n⏰ <b>Batas Pengumpulan:</b> {html.escape(deadline)}"
+
+            # WhatsApp
+            wa_msg = (
+                "📝 *Tugas Baru ditambahkan !!!*\n\n"
+                f"*Matkul:* {matkul}\n"
+                f"*Judul:* {judul}\n"
+                f"*Deskripsi:*\n{deskripsi if deskripsi else '(Tidak ada deskripsi tambahan)'}"
+            )
+            if deadline and deadline != "-":
+                wa_msg += f"\n\n⏰ *Batas Pengumpulan:* {deadline}"
+
+            send_to_wa = True
+
+            # Kirim pesan teks deskripsi dulu
+            tg_success = await self.send_text(chat_id, tg_msg)
+            if send_to_wa and wa_msg:
+                await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
+
+            # Auto-download & kirim file lampiran langsung jika diaktifkan di config
+            if self.features.get("auto_download_tugas", True):
+                file_sent_count = 0
+                if files and client:
+                    for f_item in files[:5]:  # maks 5 lampiran
+                        f_url = f_item.get("url", "")
+                        f_name = f_item.get("nama", "lampiran.pdf")
+                        if not f_url:
+                            continue
+                        try:
+                            result = client.download_file(chat_id, f_url)
+                            if result:
+                                fname, fbytes = result
+                                cap_tg = f"📎 <b>Lampiran:</b> {html.escape(fname)}\n📌 <i>{html.escape(judul)}</i>"
+                                cap_wa = f"📎 *Lampiran:* {fname}\n📌 _{judul}_"
+                                await self.send_document(chat_id, fbytes, fname, cap_tg)
+                                await self._send_file_to_whatsapp(chat_id, fbytes, fname, cap_wa)
+                                file_sent_count += 1
+                        except Exception as exc:
+                            logger.error("[User %s] Gagal kirim lampiran tugas %s: %s", chat_id, f_name, exc)
+
+                if not file_sent_count and link and files:
+                    fallback_msg = f"🔗 <i>File lampiran dapat diakses di portal ETHOL:</i> {link}"
+                    await self.send_text(chat_id, fallback_msg)
+
+            return tg_success
+
+        elif category == "presensi":
+            mk_name = item.get("mk_name", "-")
+            jam = item.get("jam", datetime.now().strftime("%H:%M:%S"))
+            minggu = item.get("minggu", "-")
+            minggu_str = f"Minggu ke-{minggu}" if str(minggu).isdigit() else str(minggu)
+
+            # Telegram (HTML)
+            tg_msg = (
+                "📢 <b>Absen dibuka !!!</b>\n\n"
+                f"<b>Matkul:</b> {html.escape(mk_name)}\n"
+                f"<b>Jam:</b> {html.escape(str(jam))}\n"
+                f"<b>Minggu:</b> {html.escape(minggu_str)}"
+            )
+
+            # WhatsApp
+            wa_msg = (
+                "📢 *Absen dibuka !!!*\n\n"
+                f"*Matkul:* {mk_name}\n"
+                f"*Jam:* {jam}\n"
+                f"*Minggu:* {minggu_str}"
+            )
+
+            tg_success = await self.send_text(chat_id, tg_msg)
+            if wa_msg:
+                await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=True)
+
+            return tg_success
+
+        elif category == "materi":
+            judul = item.get("judul", "-")
+            matkul = item.get("matkul", "-")
+            link = item.get("link", "")
+
+            # Telegram (HTML)
+            tg_msg = (
+                "📚 <b>Materi baru ditambahkan !!!</b>\n\n"
+                f"<b>Matkul:</b> {html.escape(matkul)}\n"
+                f"<b>Materi:</b> {html.escape(judul)}"
+            )
+
+            # WhatsApp
+            wa_msg = (
+                "📚 *Materi baru ditambahkan !!!*\n\n"
+                f"*Matkul:* {matkul}\n"
+                f"*Materi:* {judul}"
+            )
+
+            tg_success = await self.send_text(chat_id, tg_msg)
+            if wa_msg:
+                await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
+
+            # Auto-download & kirim file materi langsung jika diaktifkan di config
+            if self.features.get("auto_download_materi", True):
+                file_downloaded = False
+                if link and client:
+                    try:
+                        result = client.download_file(chat_id, link)
+                        if result:
+                            fname, fbytes = result
+                            cap_tg = f"📄 <b>Materi:</b> {html.escape(judul)}\n📖 <i>{html.escape(matkul)}</i>"
+                            cap_wa = f"📄 *Materi:* {judul}\n📖 _{matkul}_"
+                            await self.send_document(chat_id, fbytes, fname, cap_tg)
+                            await self._send_file_to_whatsapp(chat_id, fbytes, fname, cap_wa)
+                            file_downloaded = True
+                    except Exception as exc:
+                        logger.error("[User %s] Gagal kirim file materi %s: %s", chat_id, judul, exc)
+
+                if not file_downloaded and link:
+                    fallback_msg = f"🔗 <i>Unduh materi melalui portal ETHOL:</i> {link}"
+                    await self.send_text(chat_id, fallback_msg)
+
+            return tg_success
+
+        else:
+            title = item.get("title", "Notifikasi ETHOL")
+            body = item.get("body", "-")
+            time_str = item.get("time", "")
+
+            is_task_notif = "tugas" in title.lower() or "tugas" in body.lower()
+            notif_label = "Notifikasi Tugas" if is_task_notif else "Notifikasi ETHOL"
+            icon = "📌" if is_task_notif else "🔔"
+
+            tg_msg = (
+                f"{icon} <b>{html.escape(notif_label)}</b>\n\n"
+                f"<b>Judul:</b> {html.escape(title)}\n"
+                f"<b>Detail:</b> {html.escape(body)}"
+            )
+            if time_str:
+                tg_msg += f"\n<b>Waktu:</b> {html.escape(time_str)}"
+
+            if is_task_notif:
+                wa_msg = (
+                    f"{icon} *{notif_label}*\n\n"
+                    f"*Judul:* {title}\n"
+                    f"*Detail:* {body}"
+                )
+                if time_str:
+                    wa_msg += f"\n*Waktu:* {time_str}"
+                send_to_wa = True
+
+            tg_success = await self.send_text(chat_id, tg_msg)
+            if send_to_wa and wa_msg:
+                await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
+
+            return tg_success
+
+    async def notify_task_submitted(
+        self,
+        chat_id: int,
+        task: Dict[str, Any],
+        ethol_client: Optional[Any] = None,
+    ) -> bool:
+        """Memformat dan mengirim notifikasi saat sebuah tugas sudah dikumpulkan,
+
+        serta otomatis mengunduh file jawaban yang dikumpulkan dan mengirimkannya
+        ke Telegram dan WhatsApp langsung.
+        """
+        client = ethol_client or self.ethol_client
+        matkul = task.get("matkul", "-")
+        judul = task.get("judul", "-")
+        waktu = task.get("submission_time") or datetime.now().strftime("%d %b %Y, %H:%M WIB")
+        catatan = task.get("catatan_jawaban", "").strip()
+        submitted_files: List[Dict[str, str]] = task.get("submitted_files", [])
+
+        # Telegram (HTML)
+        tg_msg = (
+            "✅ <b>Tugas Sudah Dikumpulkan !!!</b>\n\n"
+            f"<b>Matkul:</b> {html.escape(matkul)}\n"
+            f"<b>Judul:</b> {html.escape(judul)}\n"
+            f"<b>Waktu Pengumpulan:</b> {html.escape(str(waktu))}"
+        )
+        if catatan:
+            tg_msg += f"\n<b>Catatan:</b> {html.escape(catatan)}"
+
+        # WhatsApp
+        wa_msg = (
+            "✅ *Tugas Sudah Dikumpulkan !!!*\n\n"
+            f"*Matkul:* {matkul}\n"
+            f"*Judul:* {judul}\n"
+            f"*Waktu Pengumpulan:* {waktu}"
+        )
+        if catatan:
+            wa_msg += f"\n*Catatan:* {catatan}"
+
+        # 1. Kirim pesan konfirmasi teks terlebih dahulu
+        tg_success = await self.send_text(chat_id, tg_msg)
+        await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
+
+        # 2. Auto-download & kirim file jawaban jika diaktifkan di config
+        if self.features.get("auto_download_submitted_task", True) and submitted_files and client:
+            for f_item in submitted_files[:5]:
+                f_url = f_item.get("url", "")
+                f_name = f_item.get("nama", "jawaban_tugas.pdf")
+                if not f_url:
+                    continue
+                try:
+                    result = client.download_file(chat_id, f_url)
+                    if result:
+                        fname, fbytes = result
+                        cap_tg = f"📎 <b>File Jawaban:</b> {html.escape(fname)}\n📌 <i>{html.escape(judul)} ({html.escape(matkul)})</i>"
+                        cap_wa = f"📎 *File Jawaban:* {fname}\n📌 _{judul} ({matkul})_"
+                        await self.send_document(chat_id, fbytes, fname, cap_tg)
+                        await self._send_file_to_whatsapp(chat_id, fbytes, fname, cap_wa)
+                except Exception as exc:
+                    logger.error("[User %s] Gagal kirim file jawaban tugas %s: %s", chat_id, f_name, exc)
+
+        return tg_success
+
+    async def notify_presensi_result(self, chat_id: int, mk_name: str, success: bool, message: str) -> bool:
+        """Mengirim konfirmasi hasil eksekusi presensi otomatis (sukses / gagal)."""
+        clean_mk = html.escape(mk_name)
+        clean_msg = html.escape(message)
+        now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+
+        if success:
+            tg_text = (
+                "✅ <b>Presensi Berhasil Dicatat !!!</b>\n\n"
+                f"<b>Matkul:</b> {clean_mk}\n"
+                f"<b>Waktu:</b> {now_str}\n"
+                f"<b>Keterangan:</b> {clean_msg}"
+            )
+            wa_text = (
+                "✅ *Presensi Berhasil Dicatat !!!*\n\n"
+                f"*Matkul:* {mk_name}\n"
+                f"*Waktu:* {now_str}\n"
+                f"*Keterangan:* {message}"
+            )
+        else:
+            tg_text = (
+                "⚠️ <b>Presensi Gagal Dilakukan</b>\n\n"
+                f"<b>Matkul:</b> {clean_mk}\n"
+                f"<b>Waktu:</b> {now_str}\n"
+                f"<b>Keterangan:</b> {clean_msg}\n\n"
+                "<i>Silakan lakukan presensi manual di web ETHOL jika diperlukan.</i>"
+            )
+            wa_text = (
+                "⚠️ *Presensi Gagal Dilakukan*\n\n"
+                f"*Matkul:* {mk_name}\n"
+                f"*Waktu:* {now_str}\n"
+                f"*Keterangan:* {message}\n\n"
+                "_Silakan lakukan presensi manual di web ETHOL jika diperlukan._"
+            )
+
+        tg_success = await self.send_text(chat_id, tg_text)
+        await self._send_to_whatsapp(chat_id, wa_text, is_absen=False)
+        return tg_success
+
+    async def notify_skem(
+        self,
+        chat_id: int,
+        tg_msg: str,
+        wa_msg: str,
+    ) -> bool:
+        """Mengirim notifikasi perubahan status SKEM ke Telegram dan WhatsApp user."""
+        tg_success = await self.send_text(chat_id, tg_msg)
+        await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
+        return tg_success

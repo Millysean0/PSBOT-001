@@ -1,0 +1,39 @@
+{
+  "bot": {
+    "name": "PSBOT-001",
+    "version": "1.0.0",
+    "description": "PENS Smart Academic Assistant Bot (ETHOL & SKEM)"
+  },
+  "features": {
+    "whatsapp_sync_enabled": true,
+    "auto_download_materi": true,
+    "auto_download_tugas": true,
+    "auto_download_submitted_task": true,
+    "skem_monitor_enabled": true,
+    "auto_absen_enabled": true
+  },
+  "polling": {
+    "ethol_poll_interval_seconds": 30,
+    "skem_poll_interval_seconds": 300,
+    "presensi_cooldown_seconds": 300
+  },
+  "ethol": {
+    "base_url": "https://ethol.pens.ac.id",
+    "login_url": "https://login.pens.ac.id/cas/login?service=https%3A%2F%2Fethol.pens.ac.id%2Fapi%2Fauth%2Fcas-callback",
+    "cas_service_url": "https://ethol.pens.ac.id/api/auth/cas-callback",
+    "request_timeout_seconds": 15,
+    "retry_attempts": 3,
+    "retry_backoff_seconds": 5
+  },
+  "skem": {
+    "timeout_ms": 30000,
+    "portals": {
+      "pjj": "https://pens.id/skem-monitor-pjj",
+      "reguler": "https://datastudio.google.com/reporting/46a9b1ac-1c35-4cfb-9404-a90fddbb1059/page/p_karkepf7xd"
+    }
+  },
+  "whatsapp": {
+    "backend": "baileys",
+    "session_dir": "wa_session"
+  }
+}

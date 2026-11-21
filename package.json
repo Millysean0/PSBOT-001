@@ -1,0 +1,14 @@
+{
+  "name": "psbot-001-whatsapp-bridge",
+  "version": "1.0.0",
+  "description": "WhatsApp Baileys bridge for PSBOT-001 notification synchronization",
+  "main": "wa_bridge.js",
+  "scripts": {
+    "start": "node wa_bridge.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.0.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
