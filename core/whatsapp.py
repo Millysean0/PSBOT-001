@@ -72,12 +72,14 @@ class WhatsAppManager:
         phone_number: Optional[str] = None,
         loop: Optional[asyncio.AbstractEventLoop] = None,
         tg_notifier: Optional[Any] = None,
+        admin_user_id: Optional[int] = None,
     ) -> None:
         self.db = db
         self.session_path = session_path
         self.phone_number = phone_number.strip() if phone_number else None
         self.loop = loop
         self.tg_notifier = tg_notifier
+        self.admin_user_id = admin_user_id
 
         self._is_running: bool = False
         self._is_connected: bool = False
@@ -226,30 +228,32 @@ class WhatsAppManager:
         user_id = self.db.validate_and_consume_wa_connect_code(code)
         if user_id:
             user_data = self.db.get_user(user_id) or {}
-            raw_display = (
-                user_data.get("ethol_username_display")
-                or user_data.get("first_name")
-                or f"User {user_id}"
-            )
+            nama = user_data.get("nama") or user_data.get("first_name") or f"User {user_id}"
+            raw_display = user_data.get("ethol_username_display") or nama
             display_name = mask_account(raw_display)
             chat_type = "group" if is_group else "private"
             self.db.link_user_whatsapp(user_id, chat_jid, chat_type=chat_type)
 
             reply = (
-                "Tautan Berhasil\n"
-                f"Akun: {display_name}\n"
-                f"Tipe: {'Grup' if is_group else 'Pribadi'}\n"
-                "Fitur: Notifikasi tugas, materi, absensi, dan SKEM terintegrasi."
+                "✅ *Tautan Berhasil!*\n\n"
+                f"Halo, *{nama}*! 👋\n"
+                f"Chat ini ({('grup' if is_group else 'pribadi')}) sudah terhubung ke akunmu.\n\n"
+                "Mulai sekarang kamu akan dapat notifikasi otomatis:\n"
+                "• 📋 Tugas & deadline baru\n"
+                "• 📚 Materi kuliah terbaru\n"
+                "• ✅ Konfirmasi auto-absen\n"
+                "• 🏅 Update status SKEM\n\n"
+                "Ketik *-status* untuk melihat info tautan ini."
             )
             self._send_reply_sync(chat_jid, reply)
             logger.info("WhatsApp chat %s berhasil ditautkan ke user_id %s", chat_jid, user_id)
 
             if self.tg_notifier and self.loop:
                 tg_text = (
-                    "<b>Tautan WhatsApp Berhasil!</b>\n"
+                    "<b>✅ Tautan WhatsApp Berhasil!</b>\n\n"
                     f"Chat ID: <code>{chat_jid}</code>\n"
-                    f"Tipe: {'Grup' if is_group else 'Pribadi'}\n"
-                    "Akun Anda sekarang akan menerima notifikasi tugas, materi, dan absensi di chat tersebut."
+                    f"Tipe: {'Grup' if is_group else 'Pribadi'}\n\n"
+                    "Akun kamu sekarang akan menerima notifikasi tugas, materi, absensi, dan SKEM di chat tersebut."
                 )
                 try:
                     asyncio.run_coroutine_threadsafe(
@@ -260,9 +264,12 @@ class WhatsAppManager:
                     pass
         else:
             reply = (
-                "Tautan Gagal\n"
-                "Keterangan: Kode tidak valid atau sudah kadaluarsa.\n"
-                "Dapatkan kode baru dari bot Telegram via perintah /connect."
+                "❌ *Tautan Gagal*\n\n"
+                "Kode yang kamu masukkan tidak valid atau sudah kedaluwarsa.\n\n"
+                "Coba lagi:\n"
+                "1. Buka bot Telegram kamu\n"
+                "2. Ketik /connect untuk mendapatkan kode baru\n"
+                "3. Kirim kode tersebut ke sini dalam waktu 10 menit"
             )
             self._send_reply_sync(chat_jid, reply)
 
@@ -270,13 +277,15 @@ class WhatsAppManager:
         rows = self.db.unlink_by_wa_chat_id(chat_jid)
         if rows > 0:
             reply = (
-                "Tautan Diputus\n"
-                "Keterangan: Chat ini tidak lagi menerima notifikasi bot."
+                "🔌 *Tautan Diputus*\n\n"
+                "Chat ini tidak lagi menerima notifikasi dari bot.\n"
+                "Ketik *-connect <kode>* jika ingin terhubung lagi."
             )
         else:
             reply = (
-                "Tautan Tidak Ditemukan\n"
-                "Keterangan: Chat ini belum ditautkan ke akun ETHOL manapun."
+                "ℹ️ *Belum Ada Tautan*\n\n"
+                "Chat ini belum pernah ditautkan ke akun ETHOL manapun.\n"
+                "Gunakan *-connect <kode>* untuk menautkan akun."
             )
         self._send_reply_sync(chat_jid, reply)
 
@@ -284,7 +293,7 @@ class WhatsAppManager:
         with self.db.get_connection() as conn:
             rows = conn.execute(
                 """
-                SELECT u.ethol_username_display, u.first_name, l.chat_type
+                SELECT u.ethol_username_display, u.nama, u.first_name, l.chat_type
                 FROM user_whatsapp_links l
                 JOIN users u ON l.user_id = u.user_id
                 WHERE l.wa_chat_id = ?;
@@ -292,18 +301,30 @@ class WhatsAppManager:
                 (chat_jid,),
             ).fetchall()
 
+        now_str = datetime.now().strftime("%d %b %Y, %H:%M WIB")
         if rows:
-            accounts = ", ".join([mask_account(r["ethol_username_display"] or r["first_name"] or "Mahasiswa") for r in rows])
+            chat_type_label = "Grup" if rows[0]["chat_type"] == "group" else "Pribadi"
+            account_lines = []
+            for r in rows:
+                nama_display = r["nama"] or r["first_name"] or "Mahasiswa"
+                masked = mask_account(r["ethol_username_display"] or nama_display)
+                account_lines.append(f"  • {nama_display} ({masked})")
+            accounts_str = "\n".join(account_lines)
             reply = (
-                "Status Tautan WhatsApp\n"
-                f"Akun Tertaut: {accounts}\n"
-                "Fitur Aktif: Pengumuman materi, tugas, absensi, notifikasi tugas."
+                "📊 *Status Tautan WhatsApp*\n\n"
+                f"💬 Tipe Chat: {chat_type_label}\n"
+                f"🕐 Waktu: {now_str}\n\n"
+                f"👤 Akun Tertaut:\n{accounts_str}\n\n"
+                "Fitur aktif: notifikasi tugas, materi, absensi, SKEM ✅"
             )
         else:
             reply = (
-                "Status Tautan WhatsApp\n"
-                "Keterangan: Belum ada akun yang tertaut di chat ini.\n"
-                "Gunakan -connect <kode unik> untuk menautkan akun."
+                "📊 *Status Tautan WhatsApp*\n\n"
+                "❌ Chat ini belum terhubung ke akun ETHOL manapun.\n\n"
+                "Cara menautkan:\n"
+                "1. Buka bot Telegram kamu → ketik /connect\n"
+                "2. Salin kode yang diberikan\n"
+                "3. Kirim ke sini: *-connect <kode>*"
             )
         self._send_reply_sync(chat_jid, reply)
 
@@ -311,7 +332,7 @@ class WhatsAppManager:
         with self.db.get_connection() as conn:
             rows = conn.execute(
                 """
-                SELECT u.ethol_username_display, u.first_name, l.chat_type
+                SELECT u.ethol_username_display, u.nama, u.first_name, l.chat_type
                 FROM user_whatsapp_links l
                 JOIN users u ON l.user_id = u.user_id
                 WHERE l.wa_chat_id = ?;
@@ -321,53 +342,66 @@ class WhatsAppManager:
 
         now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         if rows:
-            accounts = ", ".join([mask_account(r["ethol_username_display"] or r["first_name"] or "Mahasiswa") for r in rows])
+            nama_display = rows[0]["nama"] or rows[0]["first_name"] or "Mahasiswa"
             reply = (
-                "*Test Notifikasi*\n"
-                "Status: Terhubung ✅\n"
-                f"Akun: {accounts}\n"
-                f"Waktu: {now_str}\n"
-                "Keterangan: Jalur pengiriman WhatsApp announcement berfungsi normal."
+                "🔔 *Test Notifikasi*\n\n"
+                f"Halo, *{nama_display}*! 👋\n"
+                "Jalur pengiriman WhatsApp kamu berfungsi normal ✅\n\n"
+                f"🕐 Waktu: {now_str}\n"
+                "Kamu akan menerima notifikasi otomatis dari PSBOT di sini."
             )
         else:
             reply = (
-                "*Test Notifikasi*\n"
-                "Status: Klien WhatsApp Aktif ✅\n"
-                "Akun: Belum tertaut ke akun ETHOL manapun.\n"
-                f"Waktu: {now_str}\n"
-                "Keterangan: Gunakan -connect <kode unik> untuk menautkan akun."
+                "🔔 *Test Notifikasi*\n\n"
+                "✅ Klien WhatsApp bot aktif dan berjalan.\n\n"
+                f"🕐 Waktu: {now_str}\n\n"
+                "⚠️ Chat ini belum tertaut ke akun manapun.\n"
+                "Gunakan *-connect <kode>* untuk menautkan."
             )
         self._send_reply_sync(chat_jid, reply)
 
+    def _resolve_nrp_for_chat(self, chat_jid: str, provided_nrp: str) -> tuple[str, int | None]:
+        """Mencari NRP target dan user_id dari chat_jid menggunakan db.get_user_nrp().
+
+        Returns:
+            (nrp, user_id) — nrp kosong jika tidak ditemukan.
+        """
+        target_nrp = provided_nrp.strip() if provided_nrp else ""
+        user_id: int | None = None
+
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM user_whatsapp_links WHERE wa_chat_id = ? LIMIT 1;",
+                (chat_jid,),
+            ).fetchone()
+            if row:
+                user_id = row["user_id"]
+
+        if not target_nrp and user_id:
+            try:
+                detected = self.db.get_user_nrp(user_id)
+                if detected and detected.isdigit() and len(detected) >= 6:
+                    target_nrp = detected
+            except Exception:
+                pass
+
+        return target_nrp, user_id
+
     def _process_skem_check_command(self, chat_jid: str, nrp: str) -> None:
         """Memproses perintah -skemcheck di WhatsApp untuk melihat profil & riwayat SKEM."""
-        target_nrp = nrp.strip() if nrp else ""
+        target_nrp, _ = self._resolve_nrp_for_chat(chat_jid, nrp)
 
         if not target_nrp or not target_nrp.isdigit() or len(target_nrp) < 6:
-            with self.db.get_connection() as conn:
-                row = conn.execute(
-                    """
-                    SELECT u.ethol_username_display 
-                    FROM user_whatsapp_links l
-                    JOIN users u ON l.user_id = u.user_id
-                    WHERE l.wa_chat_id = ? LIMIT 1;
-                    """,
-                    (chat_jid,),
-                ).fetchone()
-
-            if row and row["ethol_username_display"] and str(row["ethol_username_display"]).isdigit():
-                target_nrp = str(row["ethol_username_display"]).strip()
-
-        if not target_nrp:
             reply = (
-                "📊 *Perintah Cek SKEM WhatsApp*\n\n"
+                "📊 *Cek SKEM via WhatsApp*\n\n"
                 "Format: *-skemcheck <NRP>*\n\n"
-                "Bot akan mengambil data profil mahasiswa dan daftar riwayat kegiatan SKEM dari portal PENS."
+                "Contoh: -skemcheck 3125510021\n\n"
+                "Bot akan mengambil data profil & riwayat kegiatan SKEM dari portal PENS."
             )
             self._send_reply_sync(chat_jid, reply)
             return
 
-        self._send_reply_sync(chat_jid, f"⏳ Sedang mencari data SKEM untuk NRP *{target_nrp}* di portal PENS...")
+        self._send_reply_sync(chat_jid, f"⏳ Sedang ambil data SKEM untuk NRP *{target_nrp}*...\n_Mohon tunggu sebentar ya._")
 
         def _fetch_worker() -> None:
             try:
@@ -375,46 +409,32 @@ class WhatsAppManager:
                 data = fetch_skem_data(target_nrp)
                 if data:
                     res_text = format_skem_profile(data, is_html=False)
-                    res_text += f"\n\n💡 _Gunakan -skem {target_nrp} jika ingin bot terus mengawasi ajuan baru NRP ini._"
+                    res_text += f"\n\n💡 _Ketik -skem {target_nrp} agar bot pantau otomatis NRP ini._"
                     self._send_reply_sync(chat_jid, res_text)
                 else:
                     self._send_reply_sync(
                         chat_jid,
-                        f"ℹ️ *Data SKEM Belum Ditemukan*\n"
-                        f"NRP *{target_nrp}* belum memiliki riwayat ajuan kegiatan SKEM di portal PENS."
+                        f"ℹ️ *Data SKEM Belum Ditemukan*\n\n"
+                        f"NRP *{target_nrp}* belum punya riwayat ajuan SKEM di portal PENS.\n"
+                        "Coba lagi nanti atau periksa kembali NRP-nya."
                     )
             except Exception as e:
                 logger.error("Error worker _process_skem_check_command: %s", e)
-                self._send_reply_sync(chat_jid, f"❌ Terjadi kesalahan saat memeriksa data SKEM: {e}")
+                self._send_reply_sync(chat_jid, f"❌ Gagal mengambil data SKEM: {e}")
 
         threading.Thread(target=_fetch_worker, daemon=True).start()
 
     def _process_skem_monitor_command(self, chat_jid: str, nrp: str) -> None:
         """Memproses perintah -skem <nrp> di WhatsApp untuk mendaftarkan bot mengawasi NRP."""
-        target_nrp = nrp.strip() if nrp else ""
-
-        user_id = None
-        with self.db.get_connection() as conn:
-            row = conn.execute(
-                """
-                SELECT l.user_id, u.ethol_username_display 
-                FROM user_whatsapp_links l
-                JOIN users u ON l.user_id = u.user_id
-                WHERE l.wa_chat_id = ? LIMIT 1;
-                """,
-                (chat_jid,),
-            ).fetchone()
-            if row:
-                user_id = row["user_id"]
-                if not target_nrp and row["ethol_username_display"] and str(row["ethol_username_display"]).isdigit():
-                    target_nrp = str(row["ethol_username_display"]).strip()
+        target_nrp, user_id = self._resolve_nrp_for_chat(chat_jid, nrp)
 
         if not target_nrp or not target_nrp.isdigit() or len(target_nrp) < 6:
             reply = (
-                "📊 *Perintah Monitoring SKEM WhatsApp*\n\n"
+                "📊 *Monitoring SKEM via WhatsApp*\n\n"
                 "Format: *-skem <NRP>*\n\n"
-                "Bot akan mendaftarkan NRP tersebut untuk terus diawasi di latar belakang setiap ~5 menit.\n"
-                "Ketik *-skemcheck <NRP>* untuk melihat profil SKEM sekarang."
+                "Contoh: -skem 3125510021\n\n"
+                "Bot akan pantau NRP tersebut setiap ~5 menit dan kirim notif jika ada perubahan.\n"
+                "Ketik *-skemcheck <NRP>* untuk lihat profil SKEM sekarang."
             )
             self._send_reply_sync(chat_jid, reply)
             return
@@ -426,13 +446,14 @@ class WhatsAppManager:
             self.db.upsert_skem_monitor(pseudo_id, target_nrp)
 
         reply = (
-            "✅ *Pengawasan SKEM Berhasil Diaktifkan!*\n\n"
-            f"*NRP:* {target_nrp}\n"
-            "Bot kini terus mengawasi portal SKEM PENS di latar belakang.\n\n"
-            "Anda akan menerima notifikasi otomatis jika:\n"
-            "• Ada form ajuan baru yang terdeteksi\n"
-            "• Status ajuan berubah (Diterima / Ditolak)\n\n"
-            f"_Ketik -skemcheck {target_nrp} untuk melihat profil SKEM saat ini._"
+            "✅ *Pengawasan SKEM Aktif!*\n\n"
+            f"*NRP:* {target_nrp}\n\n"
+            "Bot sekarang terus pantau portal SKEM PENS di latar belakang.\n\n"
+            "Kamu akan dapat notifikasi otomatis kalau:\n"
+            "• 📄 Ada form ajuan baru\n"
+            "• ✅ Ajuan diterima\n"
+            "• ❌ Ajuan ditolak\n\n"
+            f"_Ketik -skemcheck {target_nrp} untuk lihat profil SKEM saat ini._"
         )
         self._send_reply_sync(chat_jid, reply)
 

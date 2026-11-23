@@ -1240,13 +1240,33 @@ async def cmd_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if not user_data.get("is_logged_in"):
         await message.reply_text(
-            "⚠️ <b>Akun belum login ke ETHOL PENS.</b>\n\n"
-            "Silakan login terlebih dahulu menggunakan perintah:\n"
+            "⚠️ <b>Kamu belum login ke portal ETHOL PENS!</b>\n\n"
+            "Yuk login dulu dengan cara:\n"
             "<code>/login &lt;nrp&gt; &lt;password&gt;</code>\n\n"
-            "Setelah berhasil login, jalankan kembali /connect untuk mendapatkan kode tautan WhatsApp.",
+            "Setelah berhasil login, jalankan lagi perintah <code>/connect</code> ya! 😊",
             parse_mode=ParseMode.HTML,
         )
         return
+
+    # Periksa status backend WhatsApp
+    wa_manager = context.bot_data.get("wa_manager")
+    wa_status_text = ""
+    if wa_manager:
+        if wa_manager.is_connected:
+            wa_status_text = "🟢 <b>Status WhatsApp Bot:</b> Aktif & Terhubung\n"
+        else:
+            wa_status_text = "🟡 <b>Status WhatsApp Bot:</b> Standby / Menghubungkan\n"
+    else:
+        wa_status_text = "⚪ <b>Status WhatsApp Bot:</b> Belum diaktifkan di server\n"
+
+    wa_phone = os.getenv("WA_PHONE_NUMBER", "").strip()
+    wa_target_hint = ""
+    if wa_phone:
+        clean_phone = wa_phone.replace("+", "").replace("-", "").replace(" ", "")
+        wa_target_hint = (
+            f"📱 <b>Nomor WhatsApp Bot:</b> <code>+{clean_phone}</code>\n"
+            f"🔗 <b>Chat Langsung:</b> https://wa.me/{clean_phone}\n\n"
+        )
 
     # Buat kode unik baru (berlaku 10 menit)
     code = db.create_wa_connect_code(user.id, ttl_seconds=600)
@@ -1255,22 +1275,30 @@ async def cmd_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     existing_links = db.get_user_whatsapp_links_detail(user.id)
     links_info = ""
     if existing_links:
-        links_info = "\n<b>Perangkat/Chat WhatsApp Tertaut:</b>\n"
+        links_info = "📱 <b>Chat WhatsApp yang Sedang Terhubung:</b>\n"
         for idx, l in enumerate(existing_links, 1):
             target = l["wa_chat_id"]
             ctype = "Grup" if l.get("chat_type") == "group" else "Pribadi"
-            links_info += f"{idx}. <code>{target}</code> ({ctype})\n"
+            links_info += f"  {idx}. <code>{target}</code> ({ctype})\n"
+        links_info += "\n"
 
     msg = (
-        "<b>Tautan WhatsApp</b>\n\n"
-        f"Kode Unik: <code>{code}</code>\n"
-        "Masa Berlaku: 10 Menit\n\n"
-        "<b>Cara Menghubungkan:</b>\n"
-        "Kirim perintah berikut di WhatsApp (chat pribadi bot atau grup yang dituju):\n"
-        f"<code>-connect {code}</code>\n"
-        f"{links_info}\n"
-        "<i>Catatan: User dengan nomor yang sama dapat menautkan akun berbeda ke chat/grup masing-masing. "
-        "WhatsApp hanya akan menerima pengumuman tugas, absensi, dan notifikasi tugas secara ringkas.</i>"
+        "🔗 <b>HUBUNGKAN KE WHATSAPP</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{wa_status_text}"
+        f"{wa_target_hint}"
+        f"🔑 <b>Kode Tautan Kamu:</b>\n"
+        f"👉 <code>{code}</code> 👈\n"
+        "⏱️ <i>Masa berlaku: 10 menit</i>\n\n"
+        "📝 <b>Cara Menghubungkannya:</b>\n"
+        "1. Salin kode di atas atau gunakan format perintah:\n"
+        f"   <code>-connect {code}</code>\n"
+        "2. Kirim pesan tersebut ke nomor WhatsApp bot (atau ke grup tempat bot berada).\n"
+        "3. Selesai! Kamu akan langsung mendapat notif konfirmasi.\n\n"
+        f"{links_info}"
+        "💡 <i>Setelah terhubung, bot akan kirim notif tugas baru, materi kuliah, auto-absen, dan update SKEM langsung ke WhatsApp-mu!</i>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Ketik <code>/disconnect</code> jika ingin memutus tautan WhatsApp kapan saja."
     )
 
     await message.reply_text(msg, parse_mode=ParseMode.HTML)
@@ -1287,14 +1315,17 @@ async def cmd_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     count = db.unlink_user_whatsapp(user.id)
     if count > 0:
         await message.reply_text(
-            f"✅ <b>Tautan WhatsApp Berhasil Diputus</b>\n"
-            f"Sebanyak {count} nomor/grup WhatsApp telah diputus dari akun ETHOL Anda.",
+            "🔌 <b>Tautan WhatsApp Berhasil Diputus!</b>\n\n"
+            f"Sebanyak <b>{count}</b> chat/grup WhatsApp telah diputus dari akunmu.\n"
+            "Kamu tidak akan lagi menerima notifikasi bot di WhatsApp.\n\n"
+            "Kapan pun ingin menghubungkan kembali, cukup ketik <code>/connect</code> ya! 👍",
             parse_mode=ParseMode.HTML,
         )
     else:
         await message.reply_text(
-            "ℹ️ <b>Tidak Ada Tautan WhatsApp</b>\n"
-            "Akun ETHOL Anda saat ini belum menautkan nomor atau grup WhatsApp manapun.",
+            "ℹ️ <b>Belum Ada Tautan WhatsApp</b>\n\n"
+            "Akun kamu belum terhubung ke nomor atau grup WhatsApp manapun saat ini.\n"
+            "Ketik <code>/connect</code> untuk mulai menghubungkan! ✨",
             parse_mode=ParseMode.HTML,
         )
 
