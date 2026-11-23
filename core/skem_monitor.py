@@ -46,7 +46,17 @@ SKEM_TIMEOUT_MS = 30000
 
 
 def _setup_playwright_env() -> None:
-    """Konfigurasi environment Playwright otomatis untuk Termux / Android."""
+    """Konfigurasi environment Playwright otomatis untuk Termux / Android & Linux."""
+    import platform as sys_platform
+
+    is_arm = "arm" in sys_platform.machine().lower() or "aarch64" in sys_platform.machine().lower()
+    is_termux = os.path.exists("/data/data/com.termux") or os.path.exists("/data/data/com.termux/files")
+
+    # Override platform agar Playwright tidak menolak environment Termux / Android ('<unknown>')
+    if "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE" not in os.environ:
+        if is_termux or sys_platform.system().lower() not in ("windows", "darwin"):
+            os.environ["PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"] = "ubuntu24.04-arm64" if is_arm else "ubuntu24.04-x64"
+
     if "PLAYWRIGHT_NODEJS_PATH" not in os.environ:
         node_candidates = [
             shutil.which("node"),
@@ -59,11 +69,14 @@ def _setup_playwright_env() -> None:
         if node_bin:
             os.environ["PLAYWRIGHT_NODEJS_PATH"] = node_bin
             logger.debug("[SKEM] Node.js terdeteksi untuk Playwright: %s", node_bin)
-        elif os.path.exists("/data/data/com.termux"):
+        elif is_termux:
             logger.warning("[SKEM] Node.js belum terpasang di Termux. Silakan jalankan: pkg install nodejs")
 
-    if os.path.exists("/data/data/com.termux") and "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+    if is_termux:
+        if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+        if "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" not in os.environ:
+            os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"
 
 
 _setup_playwright_env()
@@ -189,7 +202,7 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
                 "--safebrowsing-disable-auto-update",
             ]
 
-            is_termux = os.path.exists("/data/data/com.termux")
+            is_termux = os.path.exists("/data/data/com.termux") or os.path.exists("/data/data/com.termux/files")
             if is_termux:
                 launch_args.extend(["--single-process", "--no-zygote"])
 
@@ -200,6 +213,10 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
                 "/data/data/com.termux/files/usr/bin/chromium",
             ]
             chromium_path = next((c for c in chromium_candidates if c and os.path.exists(c)), None)
+
+            if is_termux and not chromium_path:
+                logger.error("[SKEM] Paket chromium belum terpasang di Termux. Silakan jalankan di Termux: pkg install chromium")
+                return None
 
             if chromium_path:
                 browser = p.chromium.launch(executable_path=chromium_path, args=launch_args, headless=True)

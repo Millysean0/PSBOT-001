@@ -221,6 +221,14 @@ def main() -> None:
     logger.info("Memulai inisialisasi PSBOT-001...")
 
     # Konfigurasi otomatis Termux / Android untuk Playwright
+    import platform as sys_platform
+    is_arm = "arm" in sys_platform.machine().lower() or "aarch64" in sys_platform.machine().lower()
+    is_termux = os.path.exists("/data/data/com.termux") or os.path.exists("/data/data/com.termux/files")
+
+    if is_termux or sys_platform.system().lower() not in ("windows", "darwin"):
+        if "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE" not in os.environ:
+            os.environ["PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"] = "ubuntu24.04-arm64" if is_arm else "ubuntu24.04-x64"
+
     if "PLAYWRIGHT_NODEJS_PATH" not in os.environ:
         import shutil
         node_candidates = [
@@ -231,8 +239,12 @@ def main() -> None:
         node_bin = next((n for n in node_candidates if n and os.path.exists(n)), None)
         if node_bin:
             os.environ["PLAYWRIGHT_NODEJS_PATH"] = node_bin
-    if os.path.exists("/data/data/com.termux") and "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+
+    if is_termux:
+        if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+        if "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" not in os.environ:
+            os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"
 
     # Redam log peringatan internal APScheduler saat job interval beririsan karena latensi jaringan
     logging.getLogger("apscheduler").setLevel(logging.ERROR)
