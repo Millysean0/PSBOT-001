@@ -43,6 +43,12 @@ def _load_skem_portals() -> Dict[str, str]:
 
 SKEM_PORTALS = _load_skem_portals()
 SKEM_TIMEOUT_MS = 30000
+_last_skem_error: Optional[str] = None
+
+
+def get_last_skem_error() -> Optional[str]:
+    """Mengembalikan pesan error terakhir saat scraping SKEM (jika ada)."""
+    return _last_skem_error
 
 
 def _setup_playwright_env() -> None:
@@ -77,6 +83,11 @@ def _setup_playwright_env() -> None:
             os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
         if "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" not in os.environ:
             os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"
+        termux_tmp = "/data/data/com.termux/files/usr/tmp"
+        if os.path.exists(termux_tmp) and "TMPDIR" not in os.environ:
+            os.environ["TMPDIR"] = termux_tmp
+        if "DISPLAY" not in os.environ:
+            os.environ["DISPLAY"] = ":0"
 
 
 _setup_playwright_env()
@@ -179,8 +190,12 @@ def parse_skem_text(lines: List[str], target_nrp: str) -> Optional[Dict[str, Any
 
 def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
     """Helper untuk menjalankan Playwright dan scraping Looker Studio untuk satu URL tertentu."""
+    global _last_skem_error
+    _last_skem_error = None
+
     if not _check_playwright_available():
-        logger.error("Playwright tidak terpasang. Jalankan: pip install playwright && playwright install chromium")
+        _last_skem_error = "Playwright belum terpasang. Jalankan: pip install playwright"
+        logger.error("[SKEM] %s", _last_skem_error)
         return None
 
     try:
@@ -192,6 +207,8 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--ozone-platform=headless",
                 "--disable-background-networking",
                 "--disable-extensions",
                 "--disable-sync",
@@ -204,7 +221,7 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
 
             is_termux = os.path.exists("/data/data/com.termux") or os.path.exists("/data/data/com.termux/files")
             if is_termux:
-                launch_args.extend(["--single-process", "--no-zygote"])
+                launch_args.extend(["--single-process", "--no-zygote", "--headless=new"])
 
             chromium_candidates = [
                 shutil.which("chromium-browser"),
@@ -215,7 +232,8 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
             chromium_path = next((c for c in chromium_candidates if c and os.path.exists(c)), None)
 
             if is_termux and not chromium_path:
-                logger.error("[SKEM] Paket chromium belum terpasang di Termux. Silakan jalankan di Termux: pkg install chromium")
+                _last_skem_error = "Paket chromium belum terpasang di Termux. Silakan jalankan di Termux: pkg install x11-repo && pkg install chromium"
+                logger.error("[SKEM] %s", _last_skem_error)
                 return None
 
             if chromium_path:
@@ -286,17 +304,12 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         err_msg = str(exc)
         if "PLAYWRIGHT_NODEJS_PATH" in err_msg or "Node.js" in err_msg:
-            logger.error(
-                "[SKEM] Node.js tidak ditemukan untuk Playwright di Termux. "
-                "Silakan jalankan di Termux: pkg install nodejs"
-            )
-        elif "Executable doesn't exist" in err_msg or "chromium" in err_msg.lower():
-            logger.error(
-                "[SKEM] Chromium tidak ditemukan di Termux. "
-                "Silakan jalankan di Termux: pkg install chromium"
-            )
+            _last_skem_error = "Node.js tidak ditemukan untuk Playwright di Termux. Silakan jalankan: pkg install nodejs"
+        elif "Executable doesn't exist" in err_msg or "chromium" in err_msg.lower() or "not supported on <unknown>" in err_msg:
+            _last_skem_error = f"Chromium tidak ditemukan atau tidak didukung di Termux. Silakan jalankan: pkg install x11-repo && pkg install chromium"
         else:
-            logger.error("[SKEM] Fatal error Playwright: %s", exc)
+            _last_skem_error = f"Kendala menjalankan Chromium di Termux: {exc}"
+        logger.error("[SKEM] %s", _last_skem_error)
         return None
 
 

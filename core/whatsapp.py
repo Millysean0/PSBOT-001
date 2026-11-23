@@ -405,19 +405,29 @@ class WhatsAppManager:
 
         def _fetch_worker() -> None:
             try:
-                from core.skem_monitor import fetch_skem_data, format_skem_profile
+                from core.skem_monitor import fetch_skem_data, format_skem_profile, get_last_skem_error
                 data = fetch_skem_data(target_nrp)
                 if data:
                     res_text = format_skem_profile(data, is_html=False)
                     res_text += f"\n\n💡 _Ketik -skem {target_nrp} agar bot pantau otomatis NRP ini._"
                     self._send_reply_sync(chat_jid, res_text)
                 else:
-                    self._send_reply_sync(
-                        chat_jid,
-                        f"ℹ️ *Data SKEM Belum Ditemukan*\n\n"
-                        f"NRP *{target_nrp}* belum punya riwayat ajuan SKEM di portal PENS.\n"
-                        "Coba lagi nanti atau periksa kembali NRP-nya."
-                    )
+                    last_err = get_last_skem_error()
+                    if last_err and ("termux" in last_err.lower() or "chromium" in last_err.lower() or "node" in last_err.lower()):
+                        self._send_reply_sync(
+                            chat_jid,
+                            f"⚠️ *Kendala Browser Chromium di Termux*\n\n"
+                            f"{last_err}\n\n"
+                            f"💡 Silakan periksa langsung via browser HP:\n"
+                            f"https://pens.id/skem-monitor-pjj"
+                        )
+                    else:
+                        self._send_reply_sync(
+                            chat_jid,
+                            f"ℹ️ *Data SKEM Belum Ditemukan*\n\n"
+                            f"NRP *{target_nrp}* belum punya riwayat ajuan SKEM di portal PENS.\n"
+                            "Coba lagi nanti atau periksa kembali NRP-nya."
+                        )
             except Exception as e:
                 logger.error("Error worker _process_skem_check_command: %s", e)
                 self._send_reply_sync(chat_jid, f"❌ Gagal mengambil data SKEM: {e}")

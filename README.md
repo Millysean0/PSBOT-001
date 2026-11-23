@@ -1,7 +1,7 @@
 # PSBOT-001: PENS Smart Academic Assistant Bot
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version 1.0.0">
+  <img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version 2.0.0">
   <img src="https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/Node.js-18%2B-green.svg" alt="Node.js 18+">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Termux-orange.svg" alt="Platform Support">

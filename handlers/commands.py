@@ -1438,7 +1438,7 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
         try:
-            from core.skem_monitor import fetch_skem_data, format_skem_profile
+            from core.skem_monitor import fetch_skem_data, format_skem_profile, get_last_skem_error
             data = await asyncio.to_thread(fetch_skem_data, target_nrp, portal_choice)
 
             if data:
@@ -1446,12 +1446,26 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 reply_html += f"\n\n💡 <i>Gunakan <code>/skem {target_nrp}</code> jika ingin bot terus memantau setiap ada ajuan baru untuk NRP ini.</i>"
                 await status_msg.edit_text(reply_html, parse_mode=ParseMode.HTML)
             else:
-                await status_msg.edit_text(
-                    f"ℹ️ <b>Belum Ada Data SKEM Ditemukan</b>\n\n"
-                    f"NRP <code>{target_nrp}</code> saat ini belum memiliki data riwayat ajuan kegiatan SKEM di portal PENS (PJJ maupun Reguler).\n"
-                    f"Pastikan nomor NRP sudah benar ya!",
-                    parse_mode=ParseMode.HTML,
-                )
+                last_err = get_last_skem_error()
+                if last_err and ("termux" in last_err.lower() or "chromium" in last_err.lower() or "node" in last_err.lower() or "playwright" in last_err.lower()):
+                    await status_msg.edit_text(
+                        f"⚠️ <b>Kendala Browser Chromium di Termux / Android</b>\n\n"
+                        f"<i>{html.escape(last_err)}</i>\n\n"
+                        f"💡 <b>Solusi di Termux:</b>\n"
+                        f"1. Pastikan paket terpasang:\n"
+                        f"   <code>pkg update && pkg install x11-repo && pkg install chromium nodejs</code>\n"
+                        f"2. Anda juga dapat langsung melihat data SKEM di browser HP:\n"
+                        f"   🔗 <a href='https://pens.id/skem-monitor-pjj'>Portal SKEM PJJ</a> | <a href='https://datastudio.google.com/reporting/46a9b1ac-1c35-4cfb-9404-a90fddbb1059/page/p_karkepf7xd'>Portal Reguler</a>",
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                else:
+                    await status_msg.edit_text(
+                        f"ℹ️ <b>Belum Ada Data SKEM Ditemukan</b>\n\n"
+                        f"NRP <code>{target_nrp}</code> saat ini belum memiliki data riwayat ajuan kegiatan SKEM di portal PENS (PJJ maupun Reguler).\n"
+                        f"Pastikan nomor NRP sudah benar ya!",
+                        parse_mode=ParseMode.HTML,
+                    )
         except Exception as exc:
             logger.error("Error cmd_skem check: %s", exc)
             await status_msg.edit_text(f"❌ Terjadi kendala saat memeriksa data SKEM: {exc}", parse_mode=ParseMode.HTML)
