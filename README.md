@@ -297,4 +297,4 @@ Ketik perintah langsung di chat pribadi bot WhatsApp atau di grup yang ditautkan
 
 ---
 
-*Disclaimer: Bot ini merupakan utilitas pihak ketiga independen yang memanfaatkan CAS SSO dan REST API resmi ETHOL PENS serta Looker Studio SKEM PENS. Pastikan penggunaan bot mematuhi tata tertib akademik kampus.*
+*Disclaimer: Bot ini merupakan utilitas pihak ketiga independen yang memanfaatkan CAS SSO dan REST API resmi ETHOL PENS serta Looker Studio SKEM PENS. Serta developer dari bot ini tidak bertanggung jawab jika akun PENS anda terkena banned dan sejenisnya dan bot ini berfungsi untuk menjadi pengingat absensi bukan sebagai pengganti Kewajiban mahasiswa dalam melakukan absen*
