@@ -65,10 +65,6 @@ def parse_skem_text(lines: List[str], target_nrp: str) -> Optional[Dict[str, Any
             if val not in ("Keterangan", "▼", "Tanggal", "Kegiatan", "Tingkat"):
                 nilai_kredit = "0" if val in ("Tidak ada data", "-") else val
 
-    has_target_nrp = any(str(target_nrp) in l for l in lines)
-    if not has_target_nrp and (nama == "-" or not nama):
-        return None
-
     # 2. Ekstrak riwayat kegiatan dari tabel (pola: "1.", "2.", dst)
     aktivitas: List[Dict[str, str]] = []
     i = 0
@@ -110,12 +106,19 @@ def parse_skem_text(lines: List[str], target_nrp: str) -> Optional[Dict[str, Any
         else:
             i += 1
 
+    has_target_nrp = any(str(target_nrp) in l for l in lines)
+    if not has_target_nrp and (nama == "-" or not nama) and len(aktivitas) == 0:
+        return None
+
+    if nrp == "-" or not nrp:
+        nrp = str(target_nrp)
+
     return {
         "nama": nama,
         "nrp": nrp,
         "angkatan": angkatan,
         "prodi": prodi,
-        "jumlah_kegiatan": jumlah_kegiatan,
+        "jumlah_kegiatan": str(len(aktivitas)) if jumlah_kegiatan in ("-", "0", "") and len(aktivitas) > 0 else jumlah_kegiatan,
         "nilai_kredit": nilai_kredit,
         "aktivitas": aktivitas,
     }
@@ -162,17 +165,13 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
             )
 
             page = context.new_page()
+            # Hanya blokir media berat agar loading cepat tanpa memutus script Looker Studio
             page.route("**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,ttf,mp4,mp3}", lambda route: route.abort())
-            page.route("**googletagmanager**", lambda route: route.abort())
-            page.route("**google-analytics**", lambda route: route.abort())
-            page.route("**doubleclick**", lambda route: route.abort())
 
             try:
                 page.goto(url, timeout=SKEM_TIMEOUT_MS, wait_until="domcontentloaded")
-                time.sleep(2.5)
-
                 try:
-                    page.wait_for_selector("input", timeout=10000)
+                    page.wait_for_selector("input", timeout=15000)
                 except Exception:
                     pass
 
@@ -195,18 +194,11 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
                     return None
 
                 target_input.click()
-                target_input.fill("")
-                target_input.fill(str(nrp).strip())
+                page.keyboard.press("Control+A")
+                page.keyboard.press("Backspace")
+                page.keyboard.type(str(nrp).strip(), delay=50)
                 page.keyboard.press("Enter")
-
-                # Tunggu hasil pencarian diupdate oleh Looker Studio (polling maks 8s)
-                start_wait = time.time()
-                while time.time() - start_wait < 8.0:
-                    time.sleep(0.5)
-                    b_text = page.evaluate("() => document.body.innerText") or ""
-                    if str(nrp) in b_text or "tidak ada data" in b_text.lower():
-                        time.sleep(0.8)
-                        break
+                time.sleep(5.0)
 
                 raw_text = page.evaluate("() => document.body.innerText")
                 browser.close()
@@ -257,14 +249,14 @@ def fetch_skem_data(nrp: str, portal_choice: str = "auto") -> Optional[Dict[str,
     # Mode 'auto': Coba PJJ dulu
     logger.info("[SKEM-Auto] Memeriksa portal PJJ untuk NRP: %s...", clean_nrp)
     res_pjj = _scrape_portal(SKEM_PORTALS["pjj"], clean_nrp)
-    if res_pjj and res_pjj.get("nama") and res_pjj.get("nama") != "-":
+    if res_pjj and (len(res_pjj.get("aktivitas", [])) > 0 or (res_pjj.get("nama") and res_pjj.get("nama") != "-")):
         res_pjj["portal"] = "PJJ"
         return res_pjj
 
     # Fallback ke Reguler jika di PJJ kosong
     logger.info("[SKEM-Auto] NRP %s tidak ada di PJJ, beralih ke portal Reguler...", clean_nrp)
     res_reg = _scrape_portal(SKEM_PORTALS["reguler"], clean_nrp)
-    if res_reg and res_reg.get("nama") and res_reg.get("nama") != "-":
+    if res_reg and (len(res_reg.get("aktivitas", [])) > 0 or (res_reg.get("nama") and res_reg.get("nama") != "-")):
         res_reg["portal"] = "Reguler"
         return res_reg
 
