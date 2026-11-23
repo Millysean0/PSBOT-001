@@ -220,6 +220,20 @@ def main() -> None:
     print_startup_banner()
     logger.info("Memulai inisialisasi PSBOT-001...")
 
+    # Konfigurasi otomatis Termux / Android untuk Playwright
+    if "PLAYWRIGHT_NODEJS_PATH" not in os.environ:
+        import shutil
+        node_candidates = [
+            shutil.which("node"),
+            "/data/data/com.termux/files/usr/bin/node",
+            os.path.expanduser("~/../usr/bin/node"),
+        ]
+        node_bin = next((n for n in node_candidates if n and os.path.exists(n)), None)
+        if node_bin:
+            os.environ["PLAYWRIGHT_NODEJS_PATH"] = node_bin
+    if os.path.exists("/data/data/com.termux") and "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+
     # Redam log peringatan internal APScheduler saat job interval beririsan karena latensi jaringan
     logging.getLogger("apscheduler").setLevel(logging.ERROR)
     logging.getLogger("apscheduler.scheduler").setLevel(logging.ERROR)

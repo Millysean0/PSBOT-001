@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,19 +24,58 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-SKEM_PORTALS = {
-    "pjj": "https://pens.id/skem-monitor-pjj",
-    "reguler": "https://datastudio.google.com/reporting/46a9b1ac-1c35-4cfb-9404-a90fddbb1059/page/p_karkepf7xd",
-}
+
+def _load_skem_portals() -> Dict[str, str]:
+    """Memuat URL portal SKEM dari config.json."""
+    default_portals = {
+        "pjj": "https://lookerstudio.google.com/reporting/7278b81e-b3cd-4164-848b-cd34a5a3cd9d",
+        "reguler": "https://datastudio.google.com/reporting/46a9b1ac-1c35-4cfb-9404-a90fddbb1059/page/p_karkepf7xd",
+    }
+    try:
+        if os.path.exists("config.json"):
+            with open("config.json", "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                return cfg.get("skem", {}).get("portals", default_portals)
+    except Exception:
+        pass
+    return default_portals
+
+
+SKEM_PORTALS = _load_skem_portals()
 SKEM_TIMEOUT_MS = 30000
+
+
+def _setup_playwright_env() -> None:
+    """Konfigurasi environment Playwright otomatis untuk Termux / Android."""
+    if "PLAYWRIGHT_NODEJS_PATH" not in os.environ:
+        node_candidates = [
+            shutil.which("node"),
+            "/data/data/com.termux/files/usr/bin/node",
+            os.path.expanduser("~/../usr/bin/node"),
+            "/usr/bin/node",
+            "/usr/local/bin/node",
+        ]
+        node_bin = next((n for n in node_candidates if n and os.path.exists(n)), None)
+        if node_bin:
+            os.environ["PLAYWRIGHT_NODEJS_PATH"] = node_bin
+            logger.debug("[SKEM] Node.js terdeteksi untuk Playwright: %s", node_bin)
+        elif os.path.exists("/data/data/com.termux"):
+            logger.warning("[SKEM] Node.js belum terpasang di Termux. Silakan jalankan: pkg install nodejs")
+
+    if os.path.exists("/data/data/com.termux") and "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+
+
+_setup_playwright_env()
 
 
 def _check_playwright_available() -> bool:
     """Cek apakah playwright tersedia di sistem Python."""
+    _setup_playwright_env()
     try:
         from playwright.sync_api import sync_playwright  # noqa: F401
         return True
-    except ImportError:
+    except (ImportError, Exception):
         return False
 
 
@@ -150,9 +190,18 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
             ]
 
             is_termux = os.path.exists("/data/data/com.termux")
-            chromium_path = "/data/data/com.termux/files/usr/bin/chromium-browser" if is_termux else None
+            if is_termux:
+                launch_args.extend(["--single-process", "--no-zygote"])
 
-            if chromium_path and os.path.exists(chromium_path):
+            chromium_candidates = [
+                shutil.which("chromium-browser"),
+                shutil.which("chromium"),
+                "/data/data/com.termux/files/usr/bin/chromium-browser",
+                "/data/data/com.termux/files/usr/bin/chromium",
+            ]
+            chromium_path = next((c for c in chromium_candidates if c and os.path.exists(c)), None)
+
+            if chromium_path:
                 browser = p.chromium.launch(executable_path=chromium_path, args=launch_args, headless=True)
             else:
                 browser = p.chromium.launch(args=launch_args, headless=True)
@@ -218,7 +267,19 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
                 return None
 
     except Exception as exc:
-        logger.error("[SKEM] Fatal error Playwright: %s", exc)
+        err_msg = str(exc)
+        if "PLAYWRIGHT_NODEJS_PATH" in err_msg or "Node.js" in err_msg:
+            logger.error(
+                "[SKEM] Node.js tidak ditemukan untuk Playwright di Termux. "
+                "Silakan jalankan di Termux: pkg install nodejs"
+            )
+        elif "Executable doesn't exist" in err_msg or "chromium" in err_msg.lower():
+            logger.error(
+                "[SKEM] Chromium tidak ditemukan di Termux. "
+                "Silakan jalankan di Termux: pkg install chromium"
+            )
+        else:
+            logger.error("[SKEM] Fatal error Playwright: %s", exc)
         return None
 
 
