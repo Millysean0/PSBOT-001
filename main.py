@@ -25,6 +25,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
 )
+from telegram.request import HTTPXRequest
 
 from core.database import DatabaseManager
 from core.ethol_client import EtholClient
@@ -56,7 +57,7 @@ from handlers.commands import (
     cmd_unmute,
 )
 from utils.crypto import get_fernet
-from utils.logger import setup_logger
+from utils.logger import print_startup_banner, setup_logger
 
 
 def load_bot_config(config_path: str = "config.json") -> dict:
@@ -123,6 +124,9 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     if any(ign in err_str for ign in ("Query is too old", "query id is invalid", "Message is not modified", "Message to edit not found")):
         logger.debug("Telegram non-fatal update event: %s", context.error)
+        return
+    if any(net_err in err_str for net_err in ("ConnectError", "ConnectTimeout", "ReadTimeout", "NetworkError", "TimedOut", "RemoteProtocolError")):
+        logger.warning("Koneksi jaringan ke server Telegram mengalami fluktuasi sementara: %s", context.error)
         return
     logger.error("Exception update tidak tertangani: %s", context.error, exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
@@ -212,7 +216,11 @@ def main() -> None:
 
     log_level = os.getenv("LOG_LEVEL", "INFO")
     logger = setup_logger(level=log_level)
+    print_startup_banner()
     logger.info("Memulai inisialisasi PSBOT-001...")
+
+    # Redam log peringatan APScheduler saat job interval beririsan karena latensi jaringan
+    logging.getLogger("apscheduler.executors.default").setLevel(logging.ERROR)
 
     # Validasi environment
     bot_token, _, admin_user_id = validate_environment()
@@ -232,6 +240,7 @@ def main() -> None:
             session_path="wa_session",
             phone_number=wa_phone_number or None,
             loop=loop,
+            admin_user_id=admin_user_id,
         )
         if wa_manager.backend:
             logger.info("WhatsApp sync aktif via Baileys (Nomor: %s).", wa_phone_number or "Scan QR")
@@ -248,10 +257,18 @@ def main() -> None:
     client = EtholClient("config.json")
     filter_engine = FilterEngine("config.json")
 
-    # Bangun Telegram application
+    # Bangun Telegram application dengan konfigurasi timeout yang tangguh terhadap lonjakan jaringan
+    tg_request = HTTPXRequest(
+        connect_timeout=20.0,
+        read_timeout=30.0,
+        write_timeout=20.0,
+        pool_timeout=10.0,
+        connection_pool_size=16,
+    )
     application = (
         ApplicationBuilder()
         .token(bot_token)
+        .request(tg_request)
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .build()
