@@ -5,7 +5,7 @@
     "description": "PENS Smart Academic Assistant Bot (ETHOL & SKEM)"
   },
   "features": {
-    "whatsapp_sync_enabled": false,
+    "whatsapp_sync_enabled": true,
     "auto_download_materi": true,
     "auto_download_tugas": true,
     "auto_download_submitted_task": true,

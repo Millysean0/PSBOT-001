@@ -52,6 +52,7 @@ class BotScheduler:
         self.auto_absen_enabled_global: bool = True
         self.skem_monitor_enabled: bool = True
         self._last_tugas_poll: Dict[int, float] = {}
+        self._poll_lock = asyncio.Lock()
 
         self._load_config()
 
@@ -129,77 +130,82 @@ class BotScheduler:
 
     async def poll_job(self) -> None:
         """Siklus utama polling berkala untuk seluruh pengguna aktif."""
-        active_users = self.db.get_active_logged_in_users()
-        if not active_users:
-            logger.debug("Tidak ada user aktif untuk polling pada siklus ini.")
+        if self._poll_lock.locked():
+            logger.debug("Siklus polling sebelumnya masih berlangsung. Melewati trigger ini.")
             return
 
-        for user in active_users:
-            user_id = user["user_id"]
-            enc_u = user.get("encrypted_username")
-            enc_p = user.get("encrypted_password")
+        async with self._poll_lock:
+            active_users = self.db.get_active_logged_in_users()
+            if not active_users:
+                logger.debug("Tidak ada user aktif untuk polling pada siklus ini.")
+                return
 
-            if not enc_u or not enc_p:
-                continue
+            for user in active_users:
+                user_id = user["user_id"]
+                enc_u = user.get("encrypted_username")
+                enc_p = user.get("encrypted_password")
 
-            try:
-                username = decrypt_string(enc_u)
-                password = decrypt_string(enc_p)
-            except Exception as exc:
-                logger.error("[User %s] Kredensial korup: %s", user_id, exc)
-                continue
-
-            try:
-                # 1. Pastikan session aktif (Auto re-login jika expired)
-                is_active = await asyncio.to_thread(self.client.ensure_session, user_id, username, password)
-                if not is_active:
+                if not enc_u or not enc_p:
                     continue
 
-                # 2. Ambil data notifikasi dashboard
-                dashboard_data = await asyncio.to_thread(self.client.fetch_dashboard, user_id)
-                current_hash = dashboard_data.get("content_hash", "")
-                last_hash = user.get("last_seen_hash", "")
-                new_sent_count = 0
+                try:
+                    username = decrypt_string(enc_u)
+                    password = decrypt_string(enc_p)
+                except Exception as exc:
+                    logger.error("[User %s] Kredensial korup: %s", user_id, exc)
+                    continue
 
-                # 3. Notifikasi dashboard
-                if current_hash and current_hash != last_hash:
-                    notifications = dashboard_data.get("notifications", [])
-                    for item in notifications:
-                        should_send, reason, is_priority = self.filter_engine.should_notify_user(
-                            user_id, item, self.db
-                        )
-                        if should_send:
-                            sent = await self.notifier.notify_item(
-                                user_id, item, is_priority=is_priority, ethol_client=self.client
+                try:
+                    # 1. Pastikan session aktif (Auto re-login jika expired)
+                    is_active = await asyncio.to_thread(self.client.ensure_session, user_id, username, password)
+                    if not is_active:
+                        continue
+
+                    # 2. Ambil data notifikasi dashboard
+                    dashboard_data = await asyncio.to_thread(self.client.fetch_dashboard, user_id)
+                    current_hash = dashboard_data.get("content_hash", "")
+                    last_hash = user.get("last_seen_hash", "")
+                    new_sent_count = 0
+
+                    # 3. Notifikasi dashboard
+                    if current_hash and current_hash != last_hash:
+                        notifications = dashboard_data.get("notifications", [])
+                        for item in notifications:
+                            should_send, reason, is_priority = self.filter_engine.should_notify_user(
+                                user_id, item, self.db
                             )
-                            if sent:
-                                new_sent_count += 1
+                            if should_send:
+                                sent = await self.notifier.notify_item(
+                                    user_id, item, is_priority=is_priority, ethol_client=self.client
+                                )
+                                if sent:
+                                    new_sent_count += 1
 
-                # 4. Auto-Absen
-                if self.auto_absen_enabled_global:
-                    await self._process_user_auto_absen(user_id)
+                    # 4. Auto-Absen
+                    if self.auto_absen_enabled_global:
+                        await self._process_user_auto_absen(user_id)
 
-                # 5. Deteksi tugas yang baru dikumpulkan
-                await self._process_user_submitted_tasks(user_id)
+                    # 5. Deteksi tugas yang baru dikumpulkan
+                    await self._process_user_submitted_tasks(user_id)
 
-                # 6. Update metrik polling di DB
-                self.db.update_user_poll_metrics(
-                    user_id=user_id,
-                    last_seen_hash=current_hash if current_hash else None,
-                    last_poll_at=datetime.now().isoformat(),
-                    increment_sent=new_sent_count,
-                )
+                    # 6. Update metrik polling di DB
+                    self.db.update_user_poll_metrics(
+                        user_id=user_id,
+                        last_seen_hash=current_hash if current_hash else None,
+                        last_poll_at=datetime.now().isoformat(),
+                        increment_sent=new_sent_count,
+                    )
 
-            except Exception as exc:
-                logger.error("[User %s] Error saat memproses polling: %s", user_id, exc, exc_info=True)
+                except Exception as exc:
+                    logger.error("[User %s] Error saat memproses polling: %s", user_id, exc, exc_info=True)
 
-        # Pembersihan TTL berkala
-        try:
-            self.db.clean_expired_notifications()
-            self.db.clean_expired_cooldowns()
-            self.db.clean_expired_wa_codes()
-        except Exception:
-            pass
+            # Pembersihan TTL berkala
+            try:
+                self.db.clean_expired_notifications()
+                self.db.clean_expired_cooldowns()
+                self.db.clean_expired_wa_codes()
+            except Exception:
+                pass
 
     async def _process_user_auto_absen(self, user_id: int) -> None:
         """Memeriksa sesi presensi aktif dan submit otomatis."""
