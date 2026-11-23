@@ -98,7 +98,7 @@ class BotScheduler:
                 seconds=self.poll_interval,
                 id="ethol_polling_job",
                 replace_existing=True,
-                max_instances=1,
+                max_instances=3,
                 coalesce=True,
                 misfire_grace_time=60,
             )

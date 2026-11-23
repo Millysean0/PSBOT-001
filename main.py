@@ -125,8 +125,9 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     if any(ign in err_str for ign in ("Query is too old", "query id is invalid", "Message is not modified", "Message to edit not found")):
         logger.debug("Telegram non-fatal update event: %s", context.error)
         return
-    if any(net_err in err_str for net_err in ("ConnectError", "ConnectTimeout", "ReadTimeout", "NetworkError", "TimedOut", "RemoteProtocolError")):
-        logger.warning("Koneksi jaringan ke server Telegram mengalami fluktuasi sementara: %s", context.error)
+    if any(net_err in err_str or net_err in type(context.error).__name__ for net_err in ("ConnectError", "ConnectTimeout", "ReadTimeout", "NetworkError", "TimedOut", "RemoteProtocolError")):
+        err_detail = str(context.error) or type(context.error).__name__
+        logger.warning("Koneksi jaringan ke server Telegram mengalami fluktuasi sementara: %s", err_detail)
         return
     logger.error("Exception update tidak tertangani: %s", context.error, exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
@@ -219,7 +220,9 @@ def main() -> None:
     print_startup_banner()
     logger.info("Memulai inisialisasi PSBOT-001...")
 
-    # Redam log peringatan APScheduler saat job interval beririsan karena latensi jaringan
+    # Redam log peringatan internal APScheduler saat job interval beririsan karena latensi jaringan
+    logging.getLogger("apscheduler").setLevel(logging.ERROR)
+    logging.getLogger("apscheduler.scheduler").setLevel(logging.ERROR)
     logging.getLogger("apscheduler.executors.default").setLevel(logging.ERROR)
 
     # Validasi environment
@@ -269,6 +272,7 @@ def main() -> None:
         ApplicationBuilder()
         .token(bot_token)
         .request(tg_request)
+        .get_updates_request(tg_request)
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .build()

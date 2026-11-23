@@ -152,6 +152,11 @@ class EtholClient:
                     self.retry_attempts,
                     exc,
                 )
+                try:
+                    # Tutup socket koneksi lama yang terputus agar retry membuat koneksi baru
+                    session.close()
+                except Exception:
+                    pass
                 if attempt < self.retry_attempts:
                     time.sleep(self.retry_backoff)
                 else:
@@ -191,6 +196,10 @@ class EtholClient:
                 if new_token:
                     headers["Authorization"] = f"Bearer {new_token}"
                 resp = self._request_with_retry(method, url, user_id=user_id, headers=headers, **kwargs)
+            else:
+                # Sesi / token benar-benar kedaluwarsa, bersihkan cache agar auto-relogin dapat berjalan
+                self.user_tokens.pop(user_id, None)
+                self.user_profiles.pop(user_id, None)
 
         return resp
 
@@ -205,6 +214,7 @@ class EtholClient:
         5. Validasi token dan ambil profil mahasiswa
         """
         logger.info("[User %s] Memulai proses login CAS SSO untuk: %s", user_id, username)
+        self.clear_session(user_id)
         session = self.get_session(user_id)
 
         # 1. Buka halaman login CAS
@@ -336,6 +346,13 @@ class EtholClient:
 
     def ensure_session(self, user_id: int, username: Optional[str] = None, password: Optional[str] = None) -> bool:
         """Memastikan session user tetap aktif; jalankan refresh token atau re-login jika expired."""
+        if not self.user_tokens.get(user_id):
+            if username and password:
+                logger.info("[User %s] Sesi ETHOL belum aktif / expired. Menjalankan auto re-login CAS...", user_id)
+                success, _ = self.login(user_id, username, password)
+                return success
+            return False
+
         if self.is_authenticated(user_id):
             return True
 
