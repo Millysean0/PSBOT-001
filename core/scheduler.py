@@ -250,10 +250,10 @@ class BotScheduler:
                 self.db.set_presensi_cooldown(user_id, mk_code, now)
 
     async def _process_user_submitted_tasks(self, user_id: int) -> None:
-        """Memeriksa tugas yang baru dikumpulkan oleh mahasiswa."""
+        """Memeriksa tugas yang baru dikumpulkan oleh mahasiswa (dibatasi interval 5 menit)."""
         now = time.time()
         last_check = self._last_tugas_poll.get(user_id, 0.0)
-        if now - last_check < 25.0:
+        if now - last_check < 300.0:
             return
         self._last_tugas_poll[user_id] = now
 

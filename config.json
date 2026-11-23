@@ -15,20 +15,21 @@
   "polling": {
     "ethol_poll_interval_seconds": 30,
     "skem_poll_interval_seconds": 300,
-    "presensi_cooldown_seconds": 300
+    "presensi_cooldown_seconds": 300,
+    "tugas_submission_poll_interval_seconds": 300
   },
   "ethol": {
     "base_url": "https://ethol.pens.ac.id",
     "login_url": "https://login.pens.ac.id/cas/login?service=https%3A%2F%2Fethol.pens.ac.id%2Fapi%2Fauth%2Fcas-callback",
     "cas_service_url": "https://ethol.pens.ac.id/api/auth/cas-callback",
-    "request_timeout_seconds": 25,
-    "retry_attempts": 3,
-    "retry_backoff_seconds": 3
+    "request_timeout_seconds": 15,
+    "retry_attempts": 2,
+    "retry_backoff_seconds": 2
   },
   "skem": {
     "timeout_ms": 30000,
     "portals": {
-      "pjj": "https://pens.id/skem-monitor-pjj",
+      "pjj": "https://lookerstudio.google.com/reporting/7278b81e-b3cd-4164-848b-cd34a5a3cd9d",
       "reguler": "https://datastudio.google.com/reporting/46a9b1ac-1c35-4cfb-9404-a90fddbb1059/page/p_karkepf7xd"
     }
   },

@@ -71,6 +71,9 @@ class EtholClient:
         # Cache daftar matkul per user_id {user_id: [courses]}
         self.course_cache: Dict[int, List[Dict[str, Any]]] = {}
         self.course_cache_time: Dict[int, float] = {}
+        # Cache tugas per user_id {user_id: [tasks]}
+        self.task_cache: Dict[int, List[Dict[str, Any]]] = {}
+        self.task_cache_time: Dict[int, float] = {}
         # Konfigurasi tahun & semester akademik aktif {tahun_aktif, semester_aktif, ...}
         self.academic_cfg: Dict[str, Any] = {}
 
@@ -124,6 +127,8 @@ class EtholClient:
         self.user_profiles.pop(user_id, None)
         self.course_cache.pop(user_id, None)
         self.course_cache_time.pop(user_id, None)
+        self.task_cache.pop(user_id, None)
+        self.task_cache_time.pop(user_id, None)
 
     def _request_with_retry(
         self,
@@ -132,15 +137,16 @@ class EtholClient:
         user_id: int = 0,
         **kwargs: Any,
     ) -> Optional[requests.Response]:
-        """Melakukan HTTP request dengan retry 3x dan backoff 5s untuk session pengguna."""
-        if "timeout" not in kwargs:
-            kwargs["timeout"] = self.timeout
+        """Melakukan HTTP request dengan retry dan backoff untuk session pengguna."""
+        timeout = kwargs.pop("timeout", self.timeout)
+        max_retries = kwargs.pop("max_retries", self.retry_attempts)
+        backoff = kwargs.pop("backoff", self.retry_backoff)
 
         session = self.get_session(user_id)
 
-        for attempt in range(1, self.retry_attempts + 1):
+        for attempt in range(1, max_retries + 1):
             try:
-                response = session.request(method=method, url=url, **kwargs)
+                response = session.request(method=method, url=url, timeout=timeout, **kwargs)
                 return response
             except (requests.exceptions.RequestException, requests.exceptions.Timeout) as exc:
                 logger.warning(
@@ -149,7 +155,7 @@ class EtholClient:
                     method,
                     url,
                     attempt,
-                    self.retry_attempts,
+                    max_retries,
                     exc,
                 )
                 try:
@@ -157,10 +163,10 @@ class EtholClient:
                     session.close()
                 except Exception:
                     pass
-                if attempt < self.retry_attempts:
-                    time.sleep(self.retry_backoff)
+                if attempt < max_retries:
+                    time.sleep(backoff)
                 else:
-                    logger.error("[User %s] Semua percobaan (%d) gagal untuk %s %s", user_id, self.retry_attempts, method, url)
+                    logger.error("[User %s] Semua percobaan (%d) gagal untuk %s %s", user_id, max_retries, method, url)
         return None
 
     def _api_request(
@@ -664,6 +670,7 @@ class EtholClient:
         user_id: int,
         include_all: bool = False,
         target_kuliah: Optional[int] = None,
+        force_refresh: bool = False,
     ) -> List[Dict[str, Any]]:
         """Mengambil daftar tugas kuliah pengguna dari API ETHOL (/api/tugas).
 
@@ -672,10 +679,20 @@ class EtholClient:
             include_all: Jika True, kembalikan semua tugas termasuk yang sudah dikumpulkan.
                          Jika False, hanya tugas aktif yang belum dikumpulkan.
             target_kuliah: Nomor kuliah spesifik jika hanya ingin mengambil tugas 1 mata kuliah.
+            force_refresh: Jika True, abaikan cache tugas dan ambil data segar dari server.
 
         Returns:
             List of task dictionaries.
         """
+        now_ts = time.time()
+        # Gunakan cache tugas jika ada dan belum kedaluwarsa (< 180 detik)
+        if not force_refresh and not target_kuliah and user_id in self.task_cache:
+            if now_ts - self.task_cache_time.get(user_id, 0) < 180:
+                cached_tasks = self.task_cache[user_id]
+                if not include_all:
+                    return [t for t in cached_tasks if not t.get("is_submitted")]
+                return cached_tasks
+
         courses = self.fetch_matkul(user_id)
         if not courses:
             return []
@@ -692,11 +709,14 @@ class EtholClient:
             schema = c.get("jenis_schema", 2)
             mk_name = c.get("nama", "Mata Kuliah")
 
+            # Per-kuliah timeout 12s & max 1 retry agar satu endpoint bermasalah tidak memblokir antrean
             resp = self._api_request(
                 "GET",
                 "/tugas",
                 user_id=user_id,
                 params={"kuliah": kuliah_id, "jenisSchema": schema},
+                timeout=12,
+                max_retries=1,
             )
             if not resp or resp.status_code != 200:
                 continue
@@ -821,6 +841,12 @@ class EtholClient:
 
         # Urutkan tugas: yang belum dikumpulkan & deadline terdekat didahulukan
         all_tasks.sort(key=lambda x: (x["is_submitted"], x["hours_left"] if not x["is_overdue"] else 999999))
+        if not target_kuliah:
+            self.task_cache[user_id] = all_tasks
+            self.task_cache_time[user_id] = now_ts
+
+        if not include_all:
+            return [t for t in all_tasks if not t.get("is_submitted")]
         return all_tasks
 
     def _calculate_hours_left(self, deadline_str: str) -> Tuple[int, bool]:
