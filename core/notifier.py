@@ -293,24 +293,24 @@ class Notifier:
 
         elif category == "presensi":
             mk_name = item.get("mk_name", "-")
-            jam = item.get("jam", datetime.now().strftime("%H:%M:%S"))
+            jam = item.get("jam") or item.get("waktu") or datetime.now().strftime("%H:%M:%S")
             minggu = item.get("minggu", "-")
-            minggu_str = f"Minggu ke-{minggu}" if str(minggu).isdigit() else str(minggu)
+            minggu_val = str(minggu) if minggu else "-"
 
             # Telegram (HTML)
             tg_msg = (
-                "📢 <b>Absen dibuka !!!</b>\n\n"
+                "📢 <b>Presensi dibuka ❗</b>\n\n"
                 f"<b>Matkul:</b> {html.escape(mk_name)}\n"
-                f"<b>Jam:</b> {html.escape(str(jam))}\n"
-                f"<b>Minggu:</b> {html.escape(minggu_str)}"
+                f"<b>Waktu:</b> {html.escape(str(jam))}\n"
+                f"<b>Minggu:</b> {html.escape(minggu_val)}"
             )
 
-            # WhatsApp
+            # WhatsApp (Sesuai format: Presensi dibuka ❗, Matkul, Waktu, Minggu)
             wa_msg = (
-                "📢 *Absen dibuka !!!*\n\n"
-                f"*Matkul:* {mk_name}\n"
-                f"*Jam:* {jam}\n"
-                f"*Minggu:* {minggu_str}"
+                "Presensi dibuka ❗\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {jam}\n"
+                f"Minggu: {minggu_val}"
             )
 
             tg_success = await self.send_text(chat_id, tg_msg)
@@ -469,28 +469,24 @@ class Notifier:
             tg_text = (
                 "✅ <b>Presensi Berhasil Dicatat !!!</b>\n\n"
                 f"<b>Matkul:</b> {clean_mk}\n"
-                f"<b>Waktu:</b> {now_str}\n"
-                f"<b>Keterangan:</b> {clean_msg}"
+                f"<b>Waktu:</b> {now_str}"
             )
             wa_text = (
                 "✅ *Presensi Berhasil Dicatat !!!*\n\n"
                 f"*Matkul:* {mk_name}\n"
-                f"*Waktu:* {now_str}\n"
-                f"*Keterangan:* {message}"
+                f"*Waktu:* {now_str}"
             )
         else:
             tg_text = (
                 "⚠️ <b>Presensi Gagal Dilakukan</b>\n\n"
                 f"<b>Matkul:</b> {clean_mk}\n"
-                f"<b>Waktu:</b> {now_str}\n"
-                f"<b>Keterangan:</b> {clean_msg}\n\n"
+                f"<b>Waktu:</b> {now_str}\n\n"
                 "<i>Silakan lakukan presensi manual di web ETHOL jika diperlukan.</i>"
             )
             wa_text = (
                 "⚠️ *Presensi Gagal Dilakukan*\n\n"
                 f"*Matkul:* {mk_name}\n"
-                f"*Waktu:* {now_str}\n"
-                f"*Keterangan:* {message}\n\n"
+                f"*Waktu:* {now_str}\n\n"
                 "_Silakan lakukan presensi manual di web ETHOL jika diperlukan._"
             )
 
