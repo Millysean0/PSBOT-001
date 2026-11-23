@@ -48,16 +48,12 @@ def parse_skem_text(lines: List[str], target_nrp: str) -> Optional[Dict[str, Any
     jumlah_kegiatan = "0"
     nilai_kredit = "0"
 
-    # Cek apakah ada data mahasiswa
-    has_target_nrp = any(str(target_nrp) in l for l in lines)
-    if not has_target_nrp:
-        if any("tidak ada data" in l.lower() for l in lines[:25]):
-            return None
-
     # 1. Ekstrak profil mahasiswa
     for i, l in enumerate(lines):
         if l == "Nama" and i + 1 < len(lines):
             nama = lines[i + 1]
+        elif l == "NRP" and i + 1 < len(lines) and lines[i + 1].strip().isdigit():
+            nrp = lines[i + 1].strip()
         elif l == "Program Studi" and i + 1 < len(lines):
             prodi = lines[i + 1]
         elif l == "Angkatan" and i + 1 < len(lines):
@@ -67,7 +63,11 @@ def parse_skem_text(lines: List[str], target_nrp: str) -> Optional[Dict[str, Any
         elif l == "Nilai Kredit" and i + 1 < len(lines):
             val = lines[i + 1]
             if val not in ("Keterangan", "▼", "Tanggal", "Kegiatan", "Tingkat"):
-                nilai_kredit = "0" if val == "Tidak ada data" else val
+                nilai_kredit = "0" if val in ("Tidak ada data", "-") else val
+
+    has_target_nrp = any(str(target_nrp) in l for l in lines)
+    if not has_target_nrp and (nama == "-" or not nama):
+        return None
 
     # 2. Ekstrak riwayat kegiatan dari tabel (pola: "1.", "2.", dst)
     aktivitas: List[Dict[str, str]] = []
@@ -78,7 +78,12 @@ def parse_skem_text(lines: List[str], target_nrp: str) -> Optional[Dict[str, Any
             nomor = m.group(1)
             chunk: List[str] = []
             j = i + 1
-            while j < len(lines) and not re.match(r"^\d+\.$", lines[j]) and "1 - " not in lines[j] and lines[j] != "Nama":
+            while (
+                j < len(lines)
+                and not re.match(r"^\d+\.$", lines[j])
+                and "1 - " not in lines[j]
+                and lines[j] not in ("Nama", "NRP", "Data Mahasiswa")
+            ):
                 chunk.append(lines[j])
                 j += 1
 
@@ -194,7 +199,14 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
                 target_input.fill(str(nrp).strip())
                 page.keyboard.press("Enter")
 
-                time.sleep(3.0)
+                # Tunggu hasil pencarian diupdate oleh Looker Studio (polling maks 8s)
+                start_wait = time.time()
+                while time.time() - start_wait < 8.0:
+                    time.sleep(0.5)
+                    b_text = page.evaluate("() => document.body.innerText") or ""
+                    if str(nrp) in b_text or "tidak ada data" in b_text.lower():
+                        time.sleep(0.8)
+                        break
 
                 raw_text = page.evaluate("() => document.body.innerText")
                 browser.close()
@@ -260,7 +272,7 @@ def fetch_skem_data(nrp: str, portal_choice: str = "auto") -> Optional[Dict[str,
 
 
 def format_skem_profile(data: Dict[str, Any], is_html: bool = False) -> str:
-    """Memformat profil SKEM mahasiswa menjadi teks ramah pengguna."""
+    """Memformat profil SKEM mahasiswa menjadi teks ramah pengguna yang mudah dipahami."""
     nama = data.get("nama", "-")
     nrp = data.get("nrp", "-")
     angkatan = data.get("angkatan", "-")
@@ -268,61 +280,83 @@ def format_skem_profile(data: Dict[str, Any], is_html: bool = False) -> str:
     portal_type = data.get("portal", "PENS")
     jumlah = data.get("jumlah_kegiatan", "0")
     kredit = data.get("nilai_kredit", "0")
-    if kredit in ("Tidak ada data", "Keterangan", "-"):
+    if kredit in ("Tidak ada data", "Keterangan", "-", ""):
         kredit = "0"
 
     aktivitas = data.get("aktivitas", [])
 
     if is_html:
         res = (
-            f"📊 <b>Profil SKEM Mahasiswa ({html.escape(portal_type)})</b>\n\n"
-            f"<b>Nama:</b> {html.escape(nama)}\n"
-            f"<b>NRP:</b> <code>{html.escape(nrp)}</code>\n"
-            f"<b>Angkatan:</b> {html.escape(angkatan)}\n"
-            f"<b>Program Studi:</b> {html.escape(prodi)}\n"
-            f"<b>Jumlah Kegiatan:</b> {html.escape(str(jumlah))}\n"
-            f"<b>Total Nilai Kredit:</b> {html.escape(str(kredit))}\n"
+            f"📊 <b>Profil SKEM Mahasiswa ({html.escape(portal_type)})</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Nama:</b> {html.escape(nama)}\n"
+            f"🆔 <b>NRP:</b> <code>{html.escape(nrp)}</code>\n"
+            f"🎓 <b>Program Studi:</b> {html.escape(prodi)}\n"
+            f"📅 <b>Angkatan:</b> {html.escape(angkatan)}\n"
+            f"🎯 <b>Total Nilai Kredit:</b> <b>{html.escape(str(kredit))} Poin</b>\n"
+            f"📝 <b>Total Ajuan:</b> {html.escape(str(jumlah))} kegiatan\n"
         )
         if aktivitas:
             res += "\n📋 <b>Daftar Riwayat Ajuan Kegiatan:</b>\n"
             for act in aktivitas:
                 v = act.get("validasi", "Menunggu")
-                status_icon = "✅" if v in ("Disetujui", "Diterima") else ("❌" if v == "Ditolak" else "⏳")
+                v_clean = v.strip()
+                if v_clean.lower() in ("disetujui", "diterima"):
+                    status_badge = "✅ Disetujui"
+                elif v_clean.lower() == "ditolak":
+                    status_badge = "❌ Ditolak"
+                else:
+                    status_badge = "⏳ Menunggu Validasi"
+
                 res += (
                     f"\n<b>{act.get('nomor', '•')}. {html.escape(act.get('kegiatan', '-'))}</b>\n"
-                    f"   • Tanggal: {html.escape(act.get('tanggal', '-'))}\n"
-                    f"   • Tingkat: {html.escape(act.get('tingkat', '-'))} ({html.escape(act.get('partisipasi', '-'))})\n"
-                    f"   • Status: {status_icon} <b>{html.escape(v)}</b>"
+                    f"   📅 <i>Tanggal:</i> {html.escape(act.get('tanggal', '-'))}\n"
+                    f"   🏷️ <i>Tingkat:</i> {html.escape(act.get('tingkat', '-'))} ({html.escape(act.get('partisipasi', '-'))})\n"
+                    f"   📌 <i>Status:</i> <b>{status_badge}</b>"
                 )
+                act_kredit = act.get("nilai_kredit", "-")
+                if act_kredit and act_kredit not in ("-", "Tidak ada data"):
+                    res += f" | <b>{html.escape(str(act_kredit))} Poin</b>"
                 if act.get("keterangan") and act.get("keterangan") != "-":
-                    res += f"\n   • Keterangan: <i>{html.escape(act.get('keterangan'))}</i>"
+                    res += f"\n   💬 <i>Catatan: {html.escape(act.get('keterangan'))}</i>"
         else:
-            res += "\n<i>Belum ada riwayat ajuan kegiatan SKEM yang tercatat.</i>"
+            res += "\n<i>Belum ada riwayat ajuan kegiatan SKEM yang tercatat di portal.</i>"
     else:
         res = (
-            f"📊 *Profil SKEM Mahasiswa ({portal_type})*\n\n"
+            f"📊 *Profil SKEM Mahasiswa ({portal_type})*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"*Nama:* {nama}\n"
             f"*NRP:* {nrp}\n"
-            f"*Angkatan:* {angkatan}\n"
             f"*Program Studi:* {prodi}\n"
-            f"*Jumlah Kegiatan:* {jumlah}\n"
-            f"*Total Nilai Kredit:* {kredit}\n"
+            f"*Angkatan:* {angkatan}\n"
+            f"*Total Nilai Kredit:* *{kredit} Poin*\n"
+            f"*Total Ajuan:* {jumlah} kegiatan\n"
         )
         if aktivitas:
             res += "\n📋 *Daftar Riwayat Ajuan Kegiatan:*\n"
             for act in aktivitas:
                 v = act.get("validasi", "Menunggu")
-                status_icon = "✅" if v in ("Disetujui", "Diterima") else ("❌" if v == "Ditolak" else "⏳")
+                v_clean = v.strip()
+                if v_clean.lower() in ("disetujui", "diterima"):
+                    status_badge = "✅ Disetujui"
+                elif v_clean.lower() == "ditolak":
+                    status_badge = "❌ Ditolak"
+                else:
+                    status_badge = "⏳ Menunggu Validasi"
+
                 res += (
                     f"\n*{act.get('nomor', '•')}. {act.get('kegiatan', '-')}*\n"
-                    f"   • Tanggal: {act.get('tanggal', '-')}\n"
-                    f"   • Tingkat: {act.get('tingkat', '-')} ({act.get('partisipasi', '-')})\n"
-                    f"   • Status: {status_icon} *{v}*"
+                    f"   📅 Tanggal: {act.get('tanggal', '-')}\n"
+                    f"   🏷️ Tingkat: {act.get('tingkat', '-')} ({act.get('partisipasi', '-')})\n"
+                    f"   📌 Status: *{status_badge}*"
                 )
+                act_kredit = act.get("nilai_kredit", "-")
+                if act_kredit and act_kredit not in ("-", "Tidak ada data"):
+                    res += f" | *{act_kredit} Poin*"
                 if act.get("keterangan") and act.get("keterangan") != "-":
-                    res += f"\n   • Keterangan: _{act.get('keterangan')}_"
+                    res += f"\n   💬 Catatan: _{act.get('keterangan')}_"
         else:
-            res += "\n_Belum ada riwayat ajuan kegiatan SKEM yang tercatat._"
+            res += "\n_Belum ada riwayat ajuan kegiatan SKEM yang tercatat di portal._"
 
     return res
 
@@ -362,12 +396,18 @@ def detect_skem_changes(
 
 
 # FORMAT NOTIFIKASI TIDAK DIUBAH SAMA SEKALI SESUAI INSTRUKSI USER:
-def format_skem_notification(nama: str, nrp: str, entry: Dict[str, Any]) -> Tuple[str, str]:
+def format_skem_notification(
+    nama: str,
+    nrp: str,
+    entry: Dict[str, Any],
+    total_kredit: Optional[str] = None,
+) -> Tuple[str, str]:
     """Membuat pesan notifikasi keputusan SKEM (Diterima / Ditolak) sesuai New.txt."""
     validasi = entry.get("validasi", "").lower()
     kegiatan = entry.get("kegiatan", "-")
     tanggal = entry.get("tanggal", "-")
-    nilai_kredit = entry.get("nilai_kredit", "-")
+    kredit_entry = entry.get("nilai_kredit", "-")
+    nilai_kredit = total_kredit if (total_kredit and total_kredit not in ("Tidak ada data", "-", "")) else kredit_entry
     keterangan = entry.get("keterangan", "-")
 
     if validasi in ("disetujui", "diterima"):

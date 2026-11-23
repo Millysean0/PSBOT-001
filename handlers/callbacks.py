@@ -35,6 +35,16 @@ from utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 
+async def _safe_answer(query: Any, text: str | None = None, show_alert: bool = False) -> bool:
+    """Helper aman untuk menjawab callback query tanpa crash jika query sudah kadaluarsa (expired)."""
+    try:
+        await query.answer(text=text, show_alert=show_alert)
+        return True
+    except Exception as exc:
+        logger.debug("safe_answer error (query expired/network lag): %s", exc)
+        return False
+
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Router utama untuk menangani semua interaksi inline keyboard multi-user."""
     query = update.callback_query
@@ -48,16 +58,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Handler noop (tombol mati/info)
     if data == "noop":
-        try:
-            await query.answer("ℹ️ Sesi presensi untuk mata kuliah ini sedang ditutup oleh dosen pengampu.", show_alert=True)
-        except Exception:
-            pass
+        await _safe_answer(query, "ℹ️ Sesi presensi untuk mata kuliah ini sedang ditutup atau belum dibuka.", show_alert=True)
         return
 
-    try:
-        await query.answer()
-    except Exception as exc:
-        logger.debug("Gagal menjawab callback query (network blip): %s", exc)
+    await _safe_answer(query)
 
     if data == "btn_status":
         await cmd_status(update, context)
@@ -69,18 +73,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await cmd_absen(update, context)
     elif data == "toggle_auto_absen":
         new_state = db.toggle_auto_absen(user.id)
-        alert_msg = "Auto-absen berhasil diaktifkan 🟢" if new_state else "Auto-absen dinonaktifkan 🔴"
-        await query.answer(alert_msg)
+        alert_msg = "Auto-absen aktif 🟢" if new_state else "Auto-absen dinonaktifkan 🔴"
+        await _safe_answer(query, alert_msg)
         dashboard_text, keyboard = render_absen_dashboard(user.id, db, client)
         if query.message:
             await query.message.edit_text(dashboard_text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
     elif data in ["btn_absen_refresh", "refresh_absen_status"]:
-        await query.answer("Memperbarui status sesi presensi... 🔄")
+        await _safe_answer(query, "Memperbarui status sesi presensi... 🔄")
         dashboard_text, keyboard = render_absen_dashboard(user.id, db, client)
         if query.message:
             await query.message.edit_text(dashboard_text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
     elif data == "btn_absen_manual_now":
-        await query.answer("Menjalankan presensi manual... ⚡")
+        await _safe_answer(query, "Menjalankan presensi manual... ⚡")
         _, report_text = await execute_manual_absen(user.id, client, db)
         back_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Dashboard Presensi", callback_data="btn_absen")],
@@ -89,7 +93,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if query.message:
             await query.message.edit_text(report_text, reply_markup=back_keyboard, parse_mode=ParseMode.HTML)
     elif data == "btn_absen_history":
-        await query.answer("Memuat riwayat presensi... 📋")
+        await _safe_answer(query, "Memuat riwayat presensi... 📋")
         logs = db.get_recent_presensi_logs(user.id, limit=10)
         lines = [
             "📋 <b>RIWAYAT PRESENSI BOT</b>\n"
@@ -174,7 +178,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         detail = client.get_detail_matkul(user.id, mk_id)
         if not detail:
-            await query.answer("Data mata kuliah tidak ditemukan.", show_alert=True)
+            await _safe_answer(query, "Data mata kuliah tidak ditemukan.", show_alert=True)
             return
 
         c = detail["course"]
@@ -183,7 +187,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         presensi_key = detail.get("presensi_key")
 
         if not detail.get("is_presensi_open") or not presensi_key:
-            await query.answer("Sesi presensi sudah ditutup atau belum dibuka oleh dosen.", show_alert=True)
+            await _safe_answer(query, "Sesi presensi belum dibuka atau sudah ditutup dosen.", show_alert=True)
             return
 
         sess_item = {
@@ -207,7 +211,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if success or already_attended:
             db.set_presensi_cooldown(user.id, str(c.get("nomor")), datetime.now().timestamp() + 43200)
 
-        await query.answer(f"{icon} {msg}", show_alert=True)
+        await _safe_answer(query, f"{icon} {msg}", show_alert=True)
 
         # Muat ulang tampilan detail setelah absen
         await render_detail_matkul(update, context, mk_id)
@@ -222,7 +226,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         tasks = client.fetch_tugas(user.id, include_all=True, target_kuliah=mk_id)
         if not tasks:
-            await query.answer("Tidak ada tugas pada mata kuliah ini.", show_alert=True)
+            await _safe_answer(query, "Belum ada tugas pada mata kuliah ini.", show_alert=True)
             return
 
         lines = [f"📚 <b>DAFTAR TUGAS UNTUK {html.escape(tasks[0].get('matkul', 'MATA KULIAH'))}:</b>\n━━━━━━━━━━━━━━━━━━━━"]

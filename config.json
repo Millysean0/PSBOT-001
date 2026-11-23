@@ -5,7 +5,7 @@
     "description": "PENS Smart Academic Assistant Bot (ETHOL & SKEM)"
   },
   "features": {
-    "whatsapp_sync_enabled": true,
+    "whatsapp_sync_enabled": false,
     "auto_download_materi": true,
     "auto_download_tugas": true,
     "auto_download_submitted_task": true,
@@ -21,9 +21,9 @@
     "base_url": "https://ethol.pens.ac.id",
     "login_url": "https://login.pens.ac.id/cas/login?service=https%3A%2F%2Fethol.pens.ac.id%2Fapi%2Fauth%2Fcas-callback",
     "cas_service_url": "https://ethol.pens.ac.id/api/auth/cas-callback",
-    "request_timeout_seconds": 15,
+    "request_timeout_seconds": 25,
     "retry_attempts": 3,
-    "retry_backoff_seconds": 5
+    "retry_backoff_seconds": 3
   },
   "skem": {
     "timeout_ms": 30000,

@@ -98,6 +98,8 @@ class BotScheduler:
                 id="ethol_polling_job",
                 replace_existing=True,
                 max_instances=1,
+                coalesce=True,
+                misfire_grace_time=60,
             )
 
             if self.skem_monitor_enabled:
@@ -108,6 +110,8 @@ class BotScheduler:
                     id="skem_polling_job",
                     replace_existing=True,
                     max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=120,
                 )
 
             self.scheduler.start()
@@ -147,12 +151,12 @@ class BotScheduler:
 
             try:
                 # 1. Pastikan session aktif (Auto re-login jika expired)
-                is_active = self.client.ensure_session(user_id, username, password)
+                is_active = await asyncio.to_thread(self.client.ensure_session, user_id, username, password)
                 if not is_active:
                     continue
 
                 # 2. Ambil data notifikasi dashboard
-                dashboard_data = self.client.fetch_dashboard(user_id)
+                dashboard_data = await asyncio.to_thread(self.client.fetch_dashboard, user_id)
                 current_hash = dashboard_data.get("content_hash", "")
                 last_hash = user.get("last_seen_hash", "")
                 new_sent_count = 0
@@ -202,7 +206,7 @@ class BotScheduler:
         if not self.db.is_auto_absen_enabled(user_id):
             return
 
-        active_sessions = self.client.fetch_presensi_active(user_id)
+        active_sessions = await asyncio.to_thread(self.client.fetch_presensi_active, user_id)
         if not active_sessions:
             return
 
@@ -221,7 +225,7 @@ class BotScheduler:
             if elapsed < self.cooldown_seconds:
                 continue
 
-            result = self.client.submit_absen(user_id, presensi)
+            result = await asyncio.to_thread(self.client.submit_absen, user_id, presensi)
             success = result.get("success", False)
             already_attended = result.get("already_attended", False)
             msg = result.get("message", "")
@@ -319,6 +323,7 @@ class BotScheduler:
 
                 changes = detect_skem_changes(nrp, last_seen_json, new_data)
                 if changes:
+                    total_kredit = new_data.get("nilai_kredit", "0")
                     for change in changes:
                         validasi = change.get("validasi", "").lower()
                         change_type = change.get("change_type", "")
@@ -326,7 +331,7 @@ class BotScheduler:
                         if change_type == "new":
                             tg_msg, wa_msg = format_new_skem_notification(nama, nrp, change)
                         elif validasi in ("disetujui", "diterima", "ditolak"):
-                            tg_msg, wa_msg = format_skem_notification(nama, nrp, change)
+                            tg_msg, wa_msg = format_skem_notification(nama, nrp, change, total_kredit=total_kredit)
                         else:
                             continue
 

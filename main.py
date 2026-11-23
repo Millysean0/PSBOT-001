@@ -121,6 +121,9 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     if "Conflict" in err_str:
         logger.warning("Konflik Telegram: Ada proses bot lain yang sedang berjalan menggunakan token yang sama: %s", context.error)
         return
+    if any(ign in err_str for ign in ("Query is too old", "query id is invalid", "Message is not modified", "Message to edit not found")):
+        logger.debug("Telegram non-fatal update event: %s", context.error)
+        return
     logger.error("Exception update tidak tertangani: %s", context.error, exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
         try:

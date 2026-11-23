@@ -117,19 +117,21 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     is_logged_in = bool(user_data.get("is_logged_in", 0))
-    nrp_display = user_data.get("ethol_username_display", "")
+    nrp_display = user_data.get("nrp") or user_data.get("ethol_username_display", "")
     login_badge = f"🟢 Terhubung (<code>{html.escape(nrp_display)}</code>)" if is_logged_in and nrp_display else ("🟢 Terhubung" if is_logged_in else "🔴 Belum Login (/login)")
 
     text = (
-        f"🤖 <b>ETHOL PENS Telegram Assistant (CAS SSO)</b>\n"
+        f"🤖 <b>ETHOL PENS Assistant</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Halo, <b>{html.escape(user.first_name or 'Mahasiswa')}</b>! 👋\n"
-        f"Bot ini berjalan secara multi-user dengan konsumsi RAM rendah (&lt; 150 MB) "
-        f"dan terhubung langsung ke sistem autentikasi <b>CAS PENS (login.pens.ac.id)</b> "
-        f"serta REST API portal <b>ETHOL PENS</b>.\n\n"
-        f"📌 <b>Status Akun Anda:</b> {login_badge}\n"
-        f"⏱️ <b>Interval Polling:</b> 30 detik (Auto-absen & Notifikasi aktif)\n\n"
-        f"Gunakan menu interaktif di bawah atau ketik perintah langsung:"
+        f"Halo, <b>{html.escape(user.first_name or 'Teman-teman')}</b>! 👋\n\n"
+        f"Aku asisten akademik pribadi kamu buat kampus PENS. Aku siap bantuin:\n"
+        f"• ⚡ <b>Auto-Absen Presensi:</b> Absen otomatis pas dosen buka sesi kuliah\n"
+        f"• 📚 <b>Tugas & Deadline:</b> Pantau tugas aktif dan pengingat batas waktu\n"
+        f"• 📖 <b>Materi Kuliah:</b> Info update materi perkuliahan terbaru\n"
+        f"• 🎯 <b>Monitor SKEM:</b> Pantau status ajuan SKEM kamu secara otomatis\n\n"
+        f"📌 <b>Status Akun:</b> {login_badge}\n"
+        f"⏱️ <b>Auto Polling:</b> Aktif setiap 30 detik di latar belakang\n\n"
+        f"Pilih salah satu menu di bawah atau ketik perintah langsung:"
     )
 
     if update.effective_message:
@@ -151,15 +153,15 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if len(args) < 2:
         help_text = (
-            "🔐 <b>Cara Login ke Akun ETHOL PENS (CAS SSO):</b>\n\n"
-            "Portal ETHOL menggunakan autentikasi terpusat <b>EEPIS CAS (login.pens.ac.id)</b>.\n\n"
+            "🔐 <b>Cara Login ke Akun ETHOL PENS:</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Login menggunakan akun terpusat <b>EEPIS CAS (login.pens.ac.id)</b>.\n\n"
             "Kirim perintah dengan format:\n"
             "<code>/login &lt;email_atau_netid&gt; &lt;password&gt;</code>\n\n"
-            "<i>Contoh Penggunaan:</i>\n"
-            "• <code>/login mahasiswa@it.student.pens.ac.id Rahasia123</code>\n"
-            "• <code>/login mahasiswa Rahasia123</code>\n\n"
-            "<i>🛡️ Demi keamanan privasi, pesan perintah yang Anda kirim akan "
-            "<b>langsung dihapus otomatis</b> oleh bot dalam hitungan milidetik.</i>"
+            "<i>Contoh:</i>\n"
+            "• <code>/login nama@it.student.pens.ac.id passwordKamu</code>\n"
+            "• <code>/login netidKu passwordKamu</code>\n\n"
+            "🛡️ <i>Tenang aja, pesan yang berisi password akan <b>langsung dihapus otomatis</b> dalam sekejap demi privasi dan keamanan akunmu.</i>"
         )
         await message.reply_text(help_text, parse_mode=ParseMode.HTML)
         return
@@ -175,7 +177,7 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.warning("[User %s] Gagal menghapus pesan kredensial: %s", user.id, exc)
 
     loading_msg = await update.effective_chat.send_message(
-        "🔄 <i>Memverifikasi login via EEPIS Central Authentication Service (login.pens.ac.id)... Mohon tunggu.</i>",
+        "🔄 <i>Menghubungkan ke EEPIS CAS (login.pens.ac.id)... Sebentar ya.</i>",
         parse_mode=ParseMode.HTML,
     )
 
@@ -189,6 +191,10 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     success, msg = client.login(user_id=user.id, username=username, password=password)
 
     if success:
+        profile = client.get_user_profile(user.id) or {}
+        nama_mhs = profile.get("nama", username)
+        nrp = profile.get("nipnrp", "")
+
         # Enkripsi kredensial sebelum disimpan ke database SQLite
         enc_u = encrypt_string(username)
         enc_p = encrypt_string(password)
@@ -197,25 +203,32 @@ async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             enc_username=enc_u,
             enc_password=enc_p,
             ethol_display=username,
+            nrp=nrp,
+            nama=nama_mhs,
         )
 
-        profile = client.get_user_profile(user.id) or {}
-        nama_mhs = profile.get("nama", username)
-        nrp = profile.get("nipnrp", "")
+        # Otomatis daftarkan monitoring SKEM jika NRP ditemukan
+        if nrp and nrp.isdigit() and len(nrp) >= 6:
+            db.upsert_skem_monitor(user.id, nrp)
 
         await loading_msg.edit_text(
-            f"✅ <b>Login CAS SSO Berhasil!</b>\n\n"
-            f"👤 <b>Nama:</b> <b>{html.escape(nama_mhs)}</b>\n"
-            f"🆔 <b>NRP/NetID:</b> <code>{html.escape(nrp or username)}</code>\n"
-            f"🔐 Kredensial Anda telah diamankan dengan <b>Fernet (AES)</b> di database lokal.\n"
-            f"🚀 Sesi portal ETHOL kini aktif! Background polling 30 detik & auto-absen berjalan otomatis.",
+            f"🎉 <b>Hore, login berhasil!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Selamat datang, <b>{html.escape(nama_mhs)}</b>! 👋\n"
+            f"🆔 <b>NRP:</b> <code>{html.escape(nrp or username)}</code>\n\n"
+            f"✨ Semua fitur bot sudah aktif dan siap nemenin kamu:\n"
+            f"• ⚡ <b>Auto-Absen:</b> Otomatis absen saat dosen buka sesi kuliah\n"
+            f"• 📚 <b>Notifikasi Tugas:</b> Notif langsung pas ada tugas atau materi baru\n"
+            f"• 🎯 <b>Monitor SKEM:</b> Notifikasi otomatis saat ajuan SKEM kamu diproses\n\n"
+            f"<i>Ketik /start atau klik tombol menu untuk membuka menu utama.</i>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📱 Buka Menu Utama", callback_data="btn_menu_utama")]]),
             parse_mode=ParseMode.HTML,
         )
     else:
         await loading_msg.edit_text(
-            f"❌ <b>Login CAS Gagal!</b>\n\n"
-            f"Penyebab: <i>{html.escape(msg)}</i>\n\n"
-            f"Pastikan NetID / Email PENS dan password Anda sudah benar (sesuai akun login.pens.ac.id), lalu coba lagi dengan:\n"
+            f"❌ <b>Waduh, login belum berhasil</b>\n\n"
+            f"Keterangan: <i>{html.escape(msg)}</i>\n\n"
+            f"Coba periksa lagi NetID / Email PENS dan password kamu (harus sesuai dengan akun login.pens.ac.id), lalu kirim ulang ya:\n"
             f"<code>/login &lt;email_atau_netid&gt; &lt;password&gt;</code>",
             parse_mode=ParseMode.HTML,
         )
@@ -236,8 +249,8 @@ async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if update.effective_message:
         await update.effective_message.reply_text(
             "🔒 <b>Berhasil Logout</b>\n\n"
-            "Kredensial akun PENS Anda telah dihapus dari database dan session dibersihkan. "
-            "Polling otomatis dinonaktifkan sampai Anda login kembali dengan /login.",
+            "Akun PENS kamu sudah berhasil keluar dan data login telah dihapus dari database bot demi keamanan. "
+            "Kapan pun kamu mau menggunakannya lagi, cukup ketik <code>/login</code> ya!",
             parse_mode=ParseMode.HTML,
         )
 
@@ -309,21 +322,17 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     sent_count = user_data.get("sent_count_total", 0)
 
     text = (
-        f"📊 <b>STATUS AKUN & SISTEM ETHOL-BOT</b>\n"
+        f"📊 <b>Status Bot & Akun Kamu</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Status Akun Anda:</b> {login_str}\n"
-        f"🔄 <b>Background Polling:</b> {polling_str}\n"
+        f"👤 <b>Akun Kamu:</b> {login_str}\n"
+        f"🔄 <b>Pemantauan Latar Belakang:</b> {polling_str}\n"
         f"⚡ <b>Auto-Absen Presensi:</b> {auto_absen_str}\n"
-        f"🕒 <b>Polling Terakhir:</b> <code>{last_poll_str}</code>\n"
+        f"🕒 <b>Pengecekan Terakhir:</b> <code>{last_poll_str}</code>\n"
         f"📬 <b>Notifikasi Diterima:</b> {sent_count} pesan\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 <b>Total Pengguna:</b> {stats.get('total_users', 0)} orang\n"
-        f"🟢 <b>Pengguna Aktif:</b> {stats.get('active_users', 0)} orang\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💾 <b>RAM Usage (RSS):</b> <code>{ram_mb:.2f} MB</code> ({ram_status})\n"
-        f"📈 <b>RAM % Sistem:</b> <code>{ram_percent:.1f}%</code>\n"
-        f"⚙️ <b>CPU Usage:</b> <code>{cpu_percent:.1f}%</code>\n"
-        f"⏱️ <b>Bot Uptime:</b> {uptime_str}\n"
+        f"👥 <b>Pengguna Bot:</b> {stats.get('total_users', 0)} terdaftar ({stats.get('active_users', 0)} aktif)\n"
+        f"💾 <b>Penggunaan RAM:</b> <code>{ram_mb:.1f} MB</code> ({ram_status})\n"
+        f"⚙️ <b>CPU:</b> <code>{cpu_percent:.1f}%</code> | ⏱️ <b>Uptime:</b> {uptime_str}\n"
     )
 
     if update.effective_message:
@@ -557,7 +566,7 @@ async def cmd_absen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     is_auth, _, _ = await _get_authenticated_user_credentials(user.id, db, client)
     if not is_auth:
-        await message.reply_text("⚠️ Anda belum login. Silakan gunakan /login terlebih dahulu.", parse_mode=ParseMode.HTML)
+        await message.reply_text("⚠️ Kamu belum login nih. Yuk login dulu pakai <code>/login &lt;email/netid&gt; &lt;password&gt;</code> ya!", parse_mode=ParseMode.HTML)
         return
 
     args = context.args or []
@@ -570,15 +579,15 @@ async def cmd_absen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             [InlineKeyboardButton("🔙 Menu Utama", callback_data="btn_menu_utama")],
         ])
         await message.reply_text(
-            "✅ <b>Fitur Auto-Absen Berhasil Diaktifkan!</b>\n"
+            "✅ <b>Auto-Absen Berhasil Diaktifkan!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🤖 <b>Status: 🟢 AKTIF</b>\n"
-            "Bot akan memantau portal ETHOL setiap <b>30 detik</b> di background.\n\n"
-            "Ketika dosen membuka sesi presensi untuk kelas Anda:\n"
-            "• Bot akan otomatis melakukan presensi untuk Anda.\n"
-            "• Notifikasi konfirmasi akan langsung dikirimkan ke chat Telegram ini.\n"
-            "• Dilengkapi proteksi anti-spam & cooldown otomatis.\n\n"
-            "<i>Ketik <code>/absen off</code> kapan saja jika ingin menonaktifkannya.</i>",
+            "Bot bakal otomatis mengecek portal ETHOL tiap <b>30 detik</b> di background.\n\n"
+            "Pas dosen membuka sesi presensi di kelas kamu:\n"
+            "• Bot langsung absenkan otomatis buat kamu.\n"
+            "• Kamu bakal dapet konfirmasi notifikasi di chat ini.\n"
+            "• Aman dengan jeda cooldown otomatis agar tidak spam.\n\n"
+            "💡 <i>Kapan pun mau nonaktifkan, cukup ketik <code>/absen off</code> ya.</i>",
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML,
         )
@@ -593,12 +602,12 @@ async def cmd_absen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             [InlineKeyboardButton("🔙 Menu Utama", callback_data="btn_menu_utama")],
         ])
         await message.reply_text(
-            "⏸️ <b>Fitur Auto-Absen Berhasil Dinonaktifkan</b>\n"
+            "⏸️ <b>Auto-Absen Dinonaktifkan</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🤖 <b>Status: 🔴 NONAKTIF</b>\n"
-            "Bot <b>tidak akan</b> melakukan absensi otomatis di latar belakang.\n\n"
-            "💡 <i>Anda tetap dapat melakukan presensi secara manual kapan saja dengan perintah <code>/absen manual</code> atau tombol di menu /absen.</i>\n\n"
-            "<i>Ketik <code>/absen on</code> untuk mengaktifkan kembali auto-absen.</i>",
+            "Bot sementara tidak akan absen otomatis di background.\n\n"
+            "💡 <i>Kamu tetap bisa absen manual kapan saja lewat perintah <code>/absen manual</code> atau tombol di dashboard presensi.</i>\n\n"
+            "<i>Ketik <code>/absen on</code> kapan saja untuk menyalakan kembali ya!</i>",
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML,
         )
@@ -650,28 +659,27 @@ async def cmd_tugas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     is_auth, _, _ = await _get_authenticated_user_credentials(user.id, db, client)
     if not is_auth:
-        await message.reply_text("⚠️ Anda belum login. Silakan gunakan /login terlebih dahulu.", parse_mode=ParseMode.HTML)
+        await message.reply_text("⚠️ Kamu belum login nih. Yuk login dulu pakai perintah <code>/login &lt;email/netid&gt; &lt;password&gt;</code> ya!", parse_mode=ParseMode.HTML)
         return
 
     args = context.args or []
     include_all = len(args) > 0 and args[0].lower() == "all"
 
-    wait_msg = await message.reply_text("🔄 <i>Mengambil data tugas dari ETHOL Anda...</i>", parse_mode=ParseMode.HTML)
+    wait_msg = await message.reply_text("🔄 <i>Mengambil data tugas dari ETHOL kamu... Sebentar ya.</i>", parse_mode=ParseMode.HTML)
     tasks = client.fetch_tugas(user_id=user.id, include_all=include_all)
 
     if not tasks:
         if not include_all:
             msg = (
-                "🎉 <b>Semua Tugas Selesai!</b>\n\n"
-                "Tidak ada tugas aktif yang belum dikumpulkan saat ini.\n"
-                "Ketik <code>/tugas all</code> untuk melihat riwayat tugas yang sudah dikumpulkan."
+                "🎉 <b>Mantap, semua tugas udah beres!</b>\n\n"
+                "Nggak ada tugas aktif yang belum dikumpulkan saat ini. Santai dulu atau ketik <code>/tugas all</code> buat melihat riwayat tugas yang udah kamu kumpulkan."
             )
         else:
-            msg = "ℹ️ Tidak ditemukan riwayat tugas perkuliahan pada semester aktif."
+            msg = "ℹ️ Belum ditemukan riwayat tugas kuliah pada semester aktif ini."
         await wait_msg.edit_text(msg, parse_mode=ParseMode.HTML)
         return
 
-    header = "📚 <b>SEMUA RIWAYAT TUGAS PERKULIAHAN:</b>" if include_all else "📚 <b>DAFTAR TUGAS AKTIF (BELUM DIKUMPULKAN):</b>"
+    header = "📚 <b>SEMUA RIWAYAT TUGAS KULIAH:</b>" if include_all else "📚 <b>DAFTAR TUGAS AKTIF (BELUM DIKUMPULKAN):</b>"
     lines = [f"{header}\n━━━━━━━━━━━━━━━━━━━━━━━━"]
 
     for idx, t in enumerate(tasks, start=1):
@@ -691,12 +699,12 @@ async def cmd_tugas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if t.get("grade") is not None:
                 status_line += f" | ⭐ <b>Nilai:</b> <code>{t['grade']}</code>"
         elif is_overdue:
-            status_line = "⚠️ <b>SUDAH LEWAT DEADLINE!</b> (Belum dikumpulkan)"
+            status_line = "⚠️ <b>Sudah Lewat Deadline!</b> (Belum dikumpulkan)"
         elif hours_left <= 24:
-            status_line = f"🔥 <b>KRITIS: Sisa {hours_left} Jam!</b> (Belum dikumpulkan)"
+            status_line = f"🔥 <b>Mendesak: Sisa {hours_left} Jam Lagi!</b>"
         elif hours_left <= 72:
             days = round(hours_left / 24, 1)
-            status_line = f"⚡ <b>Segera: Sisa ~{days} hari</b> ({hours_left} jam)"
+            status_line = f"⚡ <b>Segera Kumpulkan: Sisa ~{days} hari</b> ({hours_left} jam)"
         else:
             days = round(hours_left / 24, 1)
             status_line = f"⏳ <b>Batas Waktu:</b> Sisa ~{days} hari ({hours_left} jam)"
@@ -748,7 +756,7 @@ async def cmd_matkul(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     is_auth, _, _ = await _get_authenticated_user_credentials(user.id, db, client)
     if not is_auth:
-        await message.reply_text("⚠️ Anda belum login. Silakan gunakan /login terlebih dahulu.", parse_mode=ParseMode.HTML)
+        await message.reply_text("⚠️ Kamu belum login nih. Silakan login dulu pakai <code>/login</code> ya!", parse_mode=ParseMode.HTML)
         return
 
     args = context.args or []
@@ -758,11 +766,11 @@ async def cmd_matkul(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await render_detail_matkul(update, context, query)
         return
 
-    wait_msg = await message.reply_text("🔄 <i>Mengambil daftar mata kuliah semester ini...</i>", parse_mode=ParseMode.HTML)
+    wait_msg = await message.reply_text("🔄 <i>Mengambil daftar mata kuliah semester ini... Sebentar ya.</i>", parse_mode=ParseMode.HTML)
     courses = client.fetch_matkul(user.id)
 
     if not courses:
-        await wait_msg.edit_text("ℹ️ Tidak ditemukan daftar mata kuliah aktif pada semester ini.", parse_mode=ParseMode.HTML)
+        await wait_msg.edit_text("ℹ️ Belum ada daftar mata kuliah aktif pada semester ini.", parse_mode=ParseMode.HTML)
         return
 
     lines = [
@@ -944,29 +952,29 @@ async def cmd_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     is_auth, _, _ = await _get_authenticated_user_credentials(user.id, db, client)
     if not is_auth:
-        await message.reply_text("⚠️ Anda belum login. Silakan gunakan /login terlebih dahulu.", parse_mode=ParseMode.HTML)
+        await message.reply_text("⚠️ Kamu belum login nih. Silakan login dulu pakai <code>/login</code> ya!", parse_mode=ParseMode.HTML)
         return
 
-    wait_msg = await message.reply_text("🔍 <i>Mencari tugas mendesak di akun ETHOL Anda...</i>", parse_mode=ParseMode.HTML)
+    wait_msg = await message.reply_text("🔍 <i>Mengecek tugas yang mepet deadline... Sebentar ya.</i>", parse_mode=ParseMode.HTML)
     urgent_tasks = client.fetch_deadline_tugas(user_id=user.id, days_threshold=3)
 
     if not urgent_tasks:
         await wait_msg.edit_text(
-            "🎉 <b>Tenang!</b> Tidak ada tugas kuliah dengan batas waktu mendesak (≤ 3 hari).\n"
-            "Ketik <code>/tugas</code> untuk melihat daftar seluruh tugas aktif.",
+            "🎉 <b>Aman terkendali!</b> Nggak ada tugas dengan deadline mendesak (≤ 3 hari).\n"
+            "Ketik <code>/tugas</code> kalau mau intip seluruh daftar tugas kuliah kamu.",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    lines = ["🚨 <b>TUGAS DENGAN DEADLINE MENDEKAT (≤ 3 HARI):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━"]
+    lines = ["🔥 <b>PENGINGAT DEADLINE MENDESAK (≤ 3 HARI):</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n<i>Yuk segera dikerjakan dan dikumpulkan sebelum terlambat!</i>"]
     for idx, t in enumerate(urgent_tasks, start=1):
         hours = t.get("hours_left", 0)
         if t.get("is_overdue"):
-            badge = "⚠️ <b>SUDAH LEWAT DEADLINE!</b>"
+            badge = "⚠️ <b>Sudah Lewat Deadline!</b>"
         elif hours <= 12:
-            badge = f"🔥 <b>Kritis: Sisa {hours} Jam!</b>"
+            badge = f"🔥 <b>Mendesak Banget: Tinggal {hours} Jam Lagi!</b>"
         elif hours <= 24:
-            badge = f"⚡ <b>Segera: Sisa {hours} Jam!</b>"
+            badge = f"⚡ <b>Segera Kumpulkan: Sisa {hours} Jam!</b>"
         else:
             days_left = round(hours / 24, 1)
             badge = f"⏳ Sisa ~{days_left} hari ({hours} jam)"
@@ -997,14 +1005,14 @@ async def cmd_materi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     is_auth, _, _ = await _get_authenticated_user_credentials(user.id, db, client)
     if not is_auth:
-        await message.reply_text("⚠️ Anda belum login. Silakan gunakan /login terlebih dahulu.", parse_mode=ParseMode.HTML)
+        await message.reply_text("⚠️ Kamu belum login nih. Silakan login dulu pakai <code>/login</code> ya!", parse_mode=ParseMode.HTML)
         return
 
-    wait_msg = await message.reply_text("🔄 <i>Mengambil daftar materi perkuliahan...</i>", parse_mode=ParseMode.HTML)
+    wait_msg = await message.reply_text("🔄 <i>Mengambil materi kuliah terbaru... Sebentar ya.</i>", parse_mode=ParseMode.HTML)
     materials = client.fetch_materi(user.id)
 
     if not materials:
-        await wait_msg.edit_text("ℹ️ Belum ada materi kuliah baru yang diunggah oleh dosen di ETHOL.", parse_mode=ParseMode.HTML)
+        await wait_msg.edit_text("ℹ️ Belum ada materi kuliah baru yang diunggah dosen di portal ETHOL.", parse_mode=ParseMode.HTML)
         return
 
     lines = ["📎 <b>DAFTAR MATERI KULIAH TERBARU:</b>\n━━━━━━━━━━━━━━━━━━━━━━━━"]
@@ -1307,17 +1315,34 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     db: DatabaseManager = context.bot_data["db"]
+    client: EtholClient = context.bot_data.get("client")
     args = context.args or []
 
+    # Deteksi NRP pengguna jika sudah login atau tersimpan
+    detected_nrp = db.get_user_nrp(user.id)
+    if not detected_nrp and client:
+        prof = client.get_user_profile(user.id) or {}
+        detected_nrp = prof.get("nipnrp", "")
+
     if not args:
+        hint_str = (
+            f"\n💡 <i>NRP kamu terdeteksi: <code>{detected_nrp}</code>. "
+            f"Ketik <code>/skem check</code> untuk langsung cek SKEM kamu!</i>\n"
+            if detected_nrp
+            else ""
+        )
         await message.reply_text(
-            "<b>📊 Layanan SKEM PENS (PJJ & Reguler)</b>\n\n"
-            "<b>Perintah Tersedia:</b>\n"
-            "  • <code>/skem &lt;NRP&gt;</code> → Daftarkan bot untuk terus mengawasi NRP ini\n"
-            "  • <code>/skem check &lt;NRP&gt;</code> → Cek profil & riwayat ajuan SKEM saat ini\n"
-            "  • <code>/skem list</code> → Daftar NRP yang sedang diawasi\n"
-            "  • <code>/skem stop &lt;NRP&gt;</code> → Berhenti mengawasi NRP\n\n"
-            "<i>Mendukung mahasiswa PJJ dan Reguler (Pencarian otomatis di kedua portal).</i>",
+            f"📊 <b>Layanan Monitor SKEM PENS</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Bot ini siap membantu kamu memantau poin kredit dan status ajuan SKEM (PJJ & Reguler).\n\n"
+            f"<b>Perintah yang bisa kamu pakai:</b>\n"
+            f"• <code>/skem check</code> → Cek profil & riwayat ajuan SKEM kamu sekarang\n"
+            f"• <code>/skem check &lt;NRP&gt;</code> → Cek SKEM mahasiswa dengan NRP tertentu\n"
+            f"• <code>/skem &lt;NRP&gt;</code> → Daftarkan NRP untuk dipantau otomatis di latar belakang\n"
+            f"• <code>/skem list</code> → Lihat daftar NRP yang sedang dipantau\n"
+            f"• <code>/skem stop &lt;NRP&gt;</code> → Berhenti memantau NRP\n"
+            f"{hint_str}\n"
+            f"<i>Mendukung mahasiswa PJJ maupun Reguler secara otomatis.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1329,15 +1354,15 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         monitors = db.get_skem_monitors_for_user(user.id)
         if not monitors:
             await message.reply_text(
-                "ℹ️ Belum ada NRP yang didaftarkan untuk diawasi bot.\n"
-                "Gunakan: <code>/skem &lt;nrp&gt;</code>",
+                "ℹ️ Belum ada NRP yang didaftarkan untuk dipantau bot.\n"
+                "Ketik: <code>/skem &lt;NRP&gt;</code> untuk mulai memantau.",
                 parse_mode=ParseMode.HTML,
             )
         else:
             lines = "\n".join([f"• <code>{m['nrp']}</code> (Portal: {m.get('portal', 'auto').upper()}, sejak {m['created_at'][:10]})" for m in monitors])
             await message.reply_text(
-                f"<b>📊 Daftar NRP yang Sedang Diawasi:</b>\n{lines}\n\n"
-                "Gunakan <code>/skem stop &lt;nrp&gt;</code> untuk berhenti mengawasi.",
+                f"📊 <b>Daftar NRP yang Sedang Dipantau:</b>\n{lines}\n\n"
+                "Ketik <code>/skem stop &lt;NRP&gt;</code> jika ingin berhenti memantau.",
                 parse_mode=ParseMode.HTML,
             )
         return
@@ -1345,14 +1370,14 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # 2. Perintah: /skem stop <nrp>
     if sub_cmd == "stop":
         if len(args) < 2:
-            await message.reply_text("Gunakan: <code>/skem stop &lt;nrp&gt;</code>", parse_mode=ParseMode.HTML)
+            await message.reply_text("Format perintah: <code>/skem stop &lt;NRP&gt;</code>", parse_mode=ParseMode.HTML)
             return
         nrp = args[1].strip()
         removed = db.remove_skem_monitor(user.id, nrp)
         if removed > 0:
-            await message.reply_text(f"✅ Pengawasan SKEM untuk NRP <code>{nrp}</code> telah dihentikan.", parse_mode=ParseMode.HTML)
+            await message.reply_text(f"✅ Pemantauan SKEM untuk NRP <code>{nrp}</code> telah dihentikan.", parse_mode=ParseMode.HTML)
         else:
-            await message.reply_text(f"ℹ️ NRP <code>{nrp}</code> tidak ditemukan dalam daftar pengawasan kamu.", parse_mode=ParseMode.HTML)
+            await message.reply_text(f"ℹ️ NRP <code>{nrp}</code> tidak ditemukan dalam daftar pantauan kamu.", parse_mode=ParseMode.HTML)
         return
 
     # 3. Perintah: /skem check [nrp] [portal] (Melihat profil SKEM)
@@ -1365,26 +1390,19 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if len(args) > 2 and args[2].lower() in ("pjj", "reguler", "regular"):
                 portal_choice = args[2].lower()
         else:
-            # Ambil dari akun login atau monitor yang tersimpan
-            user_data = db.get_user(user.id) or {}
-            disp = user_data.get("ethol_username_display", "")
-            if disp and disp.isdigit() and len(disp) >= 6:
-                target_nrp = disp
-            else:
-                monitors = db.get_skem_monitors_for_user(user.id)
-                if monitors:
-                    target_nrp = monitors[0]["nrp"]
+            target_nrp = detected_nrp
 
         if not target_nrp:
             await message.reply_text(
-                "❌ Masukkan nomor NRP untuk melihat profil SKEM.\n"
-                "Format: <code>/skem check &lt;NRP&gt; [pjj/reguler]</code>",
+                "❌ Masukkan nomor NRP kamu ya untuk melihat data SKEM.\n"
+                "Format: <code>/skem check &lt;NRP&gt;</code>\n"
+                "Contoh: <code>/skem check 3125510021</code>",
                 parse_mode=ParseMode.HTML,
             )
             return
 
         status_msg = await message.reply_text(
-            f"⏳ <b>Sedang mengambil data profil SKEM untuk NRP <code>{target_nrp}</code> dari portal PENS...</b>",
+            f"⏳ <i>Bentar ya, lagi mengecek data SKEM untuk NRP <code>{target_nrp}</code> dari portal PENS...</i>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -1394,27 +1412,28 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
             if data:
                 reply_html = format_skem_profile(data, is_html=True)
-                reply_html += f"\n\n💡 <i>Gunakan <code>/skem {target_nrp}</code> jika ingin bot terus mengawasi ajuan baru NRP ini.</i>"
+                reply_html += f"\n\n💡 <i>Gunakan <code>/skem {target_nrp}</code> jika ingin bot terus memantau setiap ada ajuan baru untuk NRP ini.</i>"
                 await status_msg.edit_text(reply_html, parse_mode=ParseMode.HTML)
             else:
                 await status_msg.edit_text(
-                    f"ℹ️ <b>Data SKEM Belum Ditemukan</b>\n\n"
-                    f"NRP <code>{target_nrp}</code> saat ini belum memiliki riwayat ajuan kegiatan SKEM di portal PENS (PJJ maupun Reguler).",
+                    f"ℹ️ <b>Belum Ada Data SKEM Ditemukan</b>\n\n"
+                    f"NRP <code>{target_nrp}</code> saat ini belum memiliki data riwayat ajuan kegiatan SKEM di portal PENS (PJJ maupun Reguler).\n"
+                    f"Pastikan nomor NRP sudah benar ya!",
                     parse_mode=ParseMode.HTML,
                 )
         except Exception as exc:
             logger.error("Error cmd_skem check: %s", exc)
-            await status_msg.edit_text(f"❌ Terjadi kesalahan saat memeriksa data SKEM: {exc}", parse_mode=ParseMode.HTML)
+            await status_msg.edit_text(f"❌ Terjadi kendala saat memeriksa data SKEM: {exc}", parse_mode=ParseMode.HTML)
         return
 
     # 4. Default: /skem <NRP> [portal] -> Mendaftarkan bot untuk terus mengawasi NRP tersebut
     nrp = args[0].strip()
     if not nrp.isdigit() or len(nrp) < 6:
         await message.reply_text(
-            "❌ Format NRP tidak valid. Masukkan NRP berupa angka (minimal 6 digit).\n"
+            "❌ Format NRP tidak valid. Masukkan nomor NRP berupa angka (minimal 6 digit).\n\n"
             "Format:\n"
-            "  • <code>/skem &lt;NRP&gt;</code> (Untuk mengawasi NRP)\n"
-            "  • <code>/skem check &lt;NRP&gt;</code> (Untuk melihat profil SKEM)",
+            "• <code>/skem &lt;NRP&gt;</code> — Memantau NRP secara otomatis\n"
+            "• <code>/skem check [NRP]</code> — Melihat data & poin SKEM",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1427,13 +1446,14 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db.upsert_skem_monitor(user.id, nrp, portal=portal)
 
     await message.reply_text(
-        f"✅ <b>Pengawasan SKEM Berhasil Diaktifkan!</b>\n\n"
-        f"<b>NRP:</b> <code>{nrp}</code>\n"
-        f"Bot kini terus mengawasi portal SKEM PENS (<code>pens.id/skem-monitor-pjj</code>) di latar belakang.\n\n"
-        f"Anda akan menerima notifikasi otomatis jika:\n"
+        f"✅ <b>Pemantau SKEM Berhasil Diaktifkan!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 <b>NRP:</b> <code>{nrp}</code>\n\n"
+        f"Bot sekarang otomatis mengawasi portal SKEM PENS di latar belakang.\n\n"
+        f"Kamu akan menerima notifikasi langsung di sini jika:\n"
         f"• Ada form ajuan baru yang terdeteksi\n"
         f"• Status ajuan berubah (Diterima / Ditolak)\n\n"
-        f"<i>Ketik <code>/skem check {nrp}</code> jika ingin melihat profil & riwayat ajuan SKEM saat ini.</i>",
+        f"💡 <i>Ketik <code>/skem check</code> kapan saja untuk melihat poin dan riwayat ajuan SKEM kamu saat ini.</i>",
         parse_mode=ParseMode.HTML,
     )
 

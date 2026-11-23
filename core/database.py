@@ -80,6 +80,8 @@ class DatabaseManager:
                     encrypted_username TEXT DEFAULT '',
                     encrypted_password TEXT DEFAULT '',
                     ethol_username_display TEXT DEFAULT '',
+                    nrp TEXT DEFAULT '',
+                    nama TEXT DEFAULT '',
                     is_logged_in INTEGER DEFAULT 0,
                     is_paused INTEGER DEFAULT 0,
                     auto_absen_enabled INTEGER DEFAULT 1,
@@ -93,6 +95,13 @@ class DatabaseManager:
                 );
                 """
             )
+
+            # Migrasi tabel users: pastikan kolom nrp dan nama ada
+            for col in ["nrp", "nama"]:
+                try:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT '';")
+                except Exception:
+                    pass
 
             # 2. Tabel User Filters (Blacklist, Whitelist, Watchlist, Muted Categories)
             conn.execute(
@@ -300,6 +309,8 @@ class DatabaseManager:
         enc_username: str,
         enc_password: str,
         ethol_display: str,
+        nrp: str = "",
+        nama: str = "",
     ) -> None:
         """Menyimpan kredensial terenkripsi dan menandai user telah login."""
         now_str = datetime.now().isoformat()
@@ -310,13 +321,36 @@ class DatabaseManager:
                 SET encrypted_username = ?,
                     encrypted_password = ?,
                     ethol_username_display = ?,
+                    nrp = CASE WHEN ? != '' THEN ? ELSE nrp END,
+                    nama = CASE WHEN ? != '' THEN ? ELSE nama END,
                     is_logged_in = 1,
                     last_login_at = ?,
                     updated_at = ?
                 WHERE user_id = ?;
                 """,
-                (enc_username, enc_password, ethol_display, now_str, now_str, user_id),
+                (enc_username, enc_password, ethol_display, nrp, nrp, nama, nama, now_str, now_str, user_id),
             )
+
+    def get_user_nrp(self, user_id: int) -> str:
+        """Mengambil nomor NRP mahasiswa dari tabel users atau skem_monitors."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT nrp FROM users WHERE user_id = ?;", (user_id,))
+            row = cursor.fetchone()
+            if row and row["nrp"]:
+                return str(row["nrp"]).strip()
+            # Cek di skem_monitors jika ada
+            cursor = conn.execute("SELECT nrp FROM skem_monitors WHERE user_id = ? ORDER BY id DESC LIMIT 1;", (user_id,))
+            row_s = cursor.fetchone()
+            if row_s and row_s["nrp"]:
+                return str(row_s["nrp"]).strip()
+            # Cek ethol_username_display jika berupa angka
+            cursor = conn.execute("SELECT ethol_username_display FROM users WHERE user_id = ?;", (user_id,))
+            row_u = cursor.fetchone()
+            if row_u and row_u["ethol_username_display"]:
+                disp = str(row_u["ethol_username_display"]).strip()
+                if disp.isdigit() and len(disp) >= 6:
+                    return disp
+        return ""
 
     def logout_user(self, user_id: int) -> None:
         """Menghapus kredensial terenkripsi pengguna (Logout)."""
