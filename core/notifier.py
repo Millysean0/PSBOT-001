@@ -601,9 +601,9 @@ class Notifier:
                 f"<b>Waktu:</b> {now_str}"
             )
             wa_text = (
-                "✅ Presensi Berhasil Dicatat !!!\n\n"
-                f"Matkul: {mk_name}\n"
-                f"Waktu: {now_str}"
+                "✅ *Presensi Berhasil Dicatat !!!*\n\n"
+                f"*Matkul:* {mk_name}\n"
+                f"*Waktu:* {now_str}"
             )
             discord_text = (
                 "✅ **Presensi Berhasil Dicatat !!!**\n\n"
@@ -631,8 +631,8 @@ class Notifier:
             )
 
         tg_success = await self.send_text(chat_id, tg_text)
-        await self._send_to_whatsapp(chat_id, wa_text, is_absen=False)
-        await self._send_to_discord(chat_id, discord_text, is_absen=False)
+        await self._send_to_whatsapp(chat_id, wa_text, is_absen=True)
+        await self._send_to_discord(chat_id, discord_text, is_absen=True)
         return tg_success
 
     async def notify_skem(
@@ -777,11 +777,14 @@ class Notifier:
             )
             if wa_chat_id and self.wa_client:
                 try:
+                    is_grp = str(wa_chat_id).endswith("@g.us")
+                    if is_grp:
+                        wa_msg += "\n\n@all"
                     await self.wa_client.send_announcement(wa_chat_id, wa_msg)
                 except Exception as exc:
                     logger.error("Gagal kirim test absen WA ke %s: %s", wa_chat_id, exc)
             elif chat_id:
-                await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
+                await self._send_to_whatsapp(chat_id, wa_msg, is_absen=True)
 
         # 3. Discord
         if target_platform in ("all", "discord"):
@@ -792,11 +795,11 @@ class Notifier:
             )
             if discord_target_id and self.discord_client:
                 try:
-                    await self.discord_client.send_announcement(discord_target_id, discord_msg, is_absen=False)
+                    await self.discord_client.send_announcement(discord_target_id, discord_msg, is_absen=True)
                 except Exception as exc:
                     logger.error("Gagal kirim test absen Discord ke %s: %s", discord_target_id, exc)
             elif chat_id:
-                await self._send_to_discord(chat_id, discord_msg, is_absen=False)
+                await self._send_to_discord(chat_id, discord_msg, is_absen=True)
 
         return True
 
