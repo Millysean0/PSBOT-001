@@ -262,16 +262,33 @@ class BotScheduler:
             status_log = "SUCCESS" if (success and not already_attended) else ("ALREADY" if already_attended else "FAILED")
             self.db.log_presensi(user_id, mk_code, mk_name, key, status_log, msg)
 
+            jam_str = str(presensi.get("jam") or presensi.get("waktu") or datetime.now().strftime("%H:%M:%S"))
+            minggu_val = str(presensi.get("minggu") or "-")
+
             if success and not already_attended:
                 logger.info("✅ [Poller] Auto-absen berhasil dicatat untuk %s (User %s)", mk_name, user_id)
-                await self.notifier.notify_presensi_result(user_id, mk_name, True, msg)
+                await self.notifier.notify_presensi_result(
+                    chat_id=user_id,
+                    mk_name=mk_name,
+                    success=True,
+                    message=msg,
+                    jam=jam_str,
+                    minggu=minggu_val,
+                )
                 self.db.set_presensi_cooldown(user_id, mk_code, now + 43200)
             elif already_attended:
                 logger.info("ℹ️ [Poller] Sudah pernah absen untuk %s (User %s)", mk_name, user_id)
                 self.db.set_presensi_cooldown(user_id, mk_code, now + 43200)
             else:
                 logger.warning("⚠️ [Poller] Auto-absen gagal untuk %s (User %s): %s", mk_name, user_id, msg)
-                await self.notifier.notify_presensi_result(user_id, mk_name, False, msg)
+                await self.notifier.notify_presensi_result(
+                    chat_id=user_id,
+                    mk_name=mk_name,
+                    success=False,
+                    message=msg,
+                    jam=jam_str,
+                    minggu=minggu_val,
+                )
                 self.db.set_presensi_cooldown(user_id, mk_code, now)
 
     async def _process_user_submitted_tasks(self, user_id: int) -> None:

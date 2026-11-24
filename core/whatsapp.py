@@ -384,7 +384,12 @@ class WhatsAppManager:
                 self.loop,
             )
         else:
-            msg = "Presensi dibuka ❗\nMatkul: Workshop Pemrograman Web\nWaktu: " + datetime.now().strftime("%H:%M:%S") + "\nMinggu: 14"
+            msg = (
+                "📢 Presensi dibuka ❗\n\n"
+                "Matkul: Workshop Pemrograman Web\n"
+                f"Waktu: {datetime.now().strftime('%H:%M:%S')}\n"
+                "Minggu: 14"
+            )
             if is_group:
                 msg += "\n\n@all"
             self._send_reply_sync(chat_jid, msg)
@@ -397,7 +402,14 @@ class WhatsAppManager:
                 self.loop,
             )
         else:
-            msg = "✅ *Presensi Berhasil Dicatat !!!*\n\n*Matkul:* Workshop Pemrograman Web\n*Waktu:* " + datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+            msg = (
+                "📢 Presensi dibuka ❗\n\n"
+                "Matkul: Workshop Pemrograman Web\n"
+                f"Waktu: {datetime.now().strftime('%H:%M:%S')}\n"
+                "Minggu: 14"
+            )
+            if is_group:
+                msg += "\n\n@all"
             self._send_reply_sync(chat_jid, msg)
 
     def _process_testmateri_command(self, chat_jid: str, is_group: bool) -> None:

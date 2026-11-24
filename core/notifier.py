@@ -588,45 +588,60 @@ class Notifier:
 
         return tg_success
 
-    async def notify_presensi_result(self, chat_id: int, mk_name: str, success: bool, message: str) -> bool:
+    async def notify_presensi_result(
+        self,
+        chat_id: int,
+        mk_name: str,
+        success: bool,
+        message: str,
+        jam: Optional[str] = None,
+        minggu: Optional[str] = None,
+    ) -> bool:
         """Mengirim konfirmasi hasil eksekusi presensi otomatis (sukses / gagal)."""
         clean_mk = html.escape(mk_name)
         clean_msg = html.escape(message)
-        now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        jam_val = str(jam) if jam else datetime.now().strftime("%H:%M:%S")
+        minggu_val = str(minggu) if minggu else "-"
 
         if success:
             tg_text = (
-                "✅ <b>Presensi Berhasil Dicatat !!!</b>\n\n"
+                "📢 <b>Presensi dibuka ❗</b>\n\n"
                 f"<b>Matkul:</b> {clean_mk}\n"
-                f"<b>Waktu:</b> {now_str}"
+                f"<b>Waktu:</b> {html.escape(jam_val)}\n"
+                f"<b>Minggu:</b> {html.escape(minggu_val)}"
             )
             wa_text = (
                 "📢 Presensi dibuka ❗\n\n"
                 f"Matkul: {mk_name}\n"
-                f"Waktu: {now_str}"
+                f"Waktu: {jam_val}\n"
+                f"Minggu: {minggu_val}"
             )
             discord_text = (
-                "✅ **Presensi Berhasil Dicatat !!!**\n\n"
-                f"**Matkul:** {mk_name}\n"
-                f"**Waktu:** {now_str}"
+                "📢 Presensi dibuka ❗\n\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {jam_val}\n"
+                f"Minggu: {minggu_val}"
             )
         else:
             tg_text = (
                 "⚠️ <b>Presensi Gagal Dilakukan</b>\n\n"
                 f"<b>Matkul:</b> {clean_mk}\n"
-                f"<b>Waktu:</b> {now_str}\n\n"
+                f"<b>Waktu:</b> {html.escape(jam_val)}\n"
+                f"<b>Minggu:</b> {html.escape(minggu_val)}\n\n"
                 "<i>Silakan lakukan presensi manual di web ETHOL jika diperlukan.</i>"
             )
             wa_text = (
-                "⚠️ *Presensi Gagal Dilakukan*\n\n"
-                f"*Matkul:* {mk_name}\n"
-                f"*Waktu:* {now_str}\n\n"
-                "_Silakan lakukan presensi manual di web ETHOL jika diperlukan._"
+                "⚠️ Presensi Gagal Dilakukan\n\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {jam_val}\n"
+                f"Minggu: {minggu_val}\n\n"
+                "Silakan lakukan presensi manual di web ETHOL jika diperlukan."
             )
             discord_text = (
                 "⚠️ **Presensi Gagal Dilakukan**\n\n"
                 f"**Matkul:** {mk_name}\n"
-                f"**Waktu:** {now_str}\n\n"
+                f"**Waktu:** {jam_val}\n"
+                f"**Minggu:** {minggu_val}\n\n"
                 "*Silakan lakukan presensi manual di web ETHOL jika diperlukan.*"
             )
 
@@ -757,14 +772,16 @@ class Notifier:
     ) -> bool:
         """Mengirim simulasi bentuk notifikasi hasil presensi/absen tercatat ke target."""
         mk_name = "Workshop Pemrograman Web"
-        now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        jam = datetime.now().strftime("%H:%M:%S")
+        minggu_val = "14"
 
         # 1. Telegram
         if target_platform in ("all", "telegram") and chat_id:
             tg_msg = (
-                "✅ <b>Presensi Berhasil Dicatat !!!</b>\n\n"
+                "📢 <b>Presensi dibuka ❗</b>\n\n"
                 f"<b>Matkul:</b> {html.escape(mk_name)}\n"
-                f"<b>Waktu:</b> {now_str}"
+                f"<b>Waktu:</b> {html.escape(str(jam))}\n"
+                f"<b>Minggu:</b> {html.escape(minggu_val)}"
             )
             await self.send_text(chat_id, tg_msg)
 
@@ -773,13 +790,14 @@ class Notifier:
             wa_msg = (
                 "📢 Presensi dibuka ❗\n\n"
                 f"Matkul: {mk_name}\n"
-                f"Waktu: {now_str}"
+                f"Waktu: {jam}\n"
+                f"Minggu: {minggu_val}"
             )
+            if is_group:
+                wa_msg += "\n\n@all"
+
             if wa_chat_id and self.wa_client:
                 try:
-                    is_grp = str(wa_chat_id).endswith("@g.us")
-                    if is_grp:
-                        wa_msg += "\n\n@all"
                     await self.wa_client.send_announcement(wa_chat_id, wa_msg)
                 except Exception as exc:
                     logger.error("Gagal kirim test absen WA ke %s: %s", wa_chat_id, exc)
@@ -789,9 +807,10 @@ class Notifier:
         # 3. Discord
         if target_platform in ("all", "discord"):
             discord_msg = (
-                "✅ **Presensi Berhasil Dicatat !!!**\n\n"
-                f"**Matkul:** {mk_name}\n"
-                f"**Waktu:** {now_str}"
+                "📢 Presensi dibuka ❗\n\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {jam}\n"
+                f"Minggu: {minggu_val}"
             )
             if discord_target_id and self.discord_client:
                 try:

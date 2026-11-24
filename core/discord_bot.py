@@ -608,9 +608,12 @@ class DiscordManager:
         try:
             send_content = content
             if is_absen and isinstance(dest, discord.TextChannel):
-                # Tambahkan mention @everyone atau @here jika di grup/server Discord
-                if "@everyone" not in send_content and "@all" in send_content:
-                    send_content = send_content.replace("@all", "@everyone")
+                # Tambahkan mention @everyone jika di channel/server Discord
+                if "@everyone" not in send_content:
+                    if "@all" in send_content:
+                        send_content = send_content.replace("@all", "@everyone")
+                    else:
+                        send_content = f"{send_content.rstrip()}\n\n@everyone"
 
             if embed:
                 await dest.send(content=send_content if send_content else None, embed=embed)
