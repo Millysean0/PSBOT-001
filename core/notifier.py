@@ -396,7 +396,7 @@ class Notifier:
 
             # WhatsApp (Sesuai format: Presensi dibuka ❗, Matkul, Waktu, Minggu)
             wa_msg = (
-                "Presensi dibuka ❗\n"
+                "📢 <b>Presensi dibuka ❗</b>\n"
                 f"Matkul: {mk_name}\n"
                 f"Waktu: {jam}\n"
                 f"Minggu: {minggu_val}"
@@ -601,9 +601,10 @@ class Notifier:
                 f"<b>Waktu:</b> {now_str}"
             )
             wa_text = (
-                "✅ *Presensi Berhasil Dicatat !!!*\n\n"
+                "📢 <b>Presensi dibuka ❗</b>\n\n"
                 f"*Matkul:* {mk_name}\n"
                 f"*Waktu:* {now_str}"
+                f"Minggu: {minggu_val}"
             )
             discord_text = (
                 "✅ **Presensi Berhasil Dicatat !!!**\n\n"
