@@ -39,6 +39,7 @@
 ### 5. Fitur Simulasi & Uji Coba Bentuk Notifikasi (Test Notif)
 Tersedia perintah pengujian di seluruh platform (WhatsApp, Telegram, Discord):
 - `-testmatkul` / `/testmatkul` / `!testmatkul`: Memanggil dan menguji tampilan notifikasi presensi/kuliah dibuka.
+- `-testabsen` / `/testabsen` / `!testabsen`: Memanggil dan menguji tampilan notifikasi presensi berhasil dicatat.
 - `-testmateri` / `/testmateri` / `!testmateri`: Memanggil notifikasi materi baru dan mengirim contoh file lampiran PDF.
 - `-testtugas` / `/testtugas` / `!testtugas`: Memanggil notifikasi tugas baru dan mengirim contoh file lampiran PDF petunjuk soal.
 

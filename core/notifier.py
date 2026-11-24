@@ -747,6 +747,59 @@ class Notifier:
 
         return True
 
+    async def send_test_absen(
+        self,
+        chat_id: Optional[int] = None,
+        target_platform: str = "all",
+        is_group: bool = False,
+        wa_chat_id: Optional[str] = None,
+        discord_target_id: Optional[str] = None,
+    ) -> bool:
+        """Mengirim simulasi bentuk notifikasi hasil presensi/absen tercatat ke target."""
+        mk_name = "Workshop Pemrograman Web"
+        now_str = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+
+        # 1. Telegram
+        if target_platform in ("all", "telegram") and chat_id:
+            tg_msg = (
+                "✅ <b>Presensi Berhasil Dicatat !!!</b>\n\n"
+                f"<b>Matkul:</b> {html.escape(mk_name)}\n"
+                f"<b>Waktu:</b> {now_str}"
+            )
+            await self.send_text(chat_id, tg_msg)
+
+        # 2. WhatsApp
+        if target_platform in ("all", "whatsapp"):
+            wa_msg = (
+                "✅ *Presensi Berhasil Dicatat !!!*\n\n"
+                f"*Matkul:* {mk_name}\n"
+                f"*Waktu:* {now_str}"
+            )
+            if wa_chat_id and self.wa_client:
+                try:
+                    await self.wa_client.send_announcement(wa_chat_id, wa_msg)
+                except Exception as exc:
+                    logger.error("Gagal kirim test absen WA ke %s: %s", wa_chat_id, exc)
+            elif chat_id:
+                await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
+
+        # 3. Discord
+        if target_platform in ("all", "discord"):
+            discord_msg = (
+                "✅ **Presensi Berhasil Dicatat !!!**\n\n"
+                f"**Matkul:** {mk_name}\n"
+                f"**Waktu:** {now_str}"
+            )
+            if discord_target_id and self.discord_client:
+                try:
+                    await self.discord_client.send_announcement(discord_target_id, discord_msg, is_absen=False)
+                except Exception as exc:
+                    logger.error("Gagal kirim test absen Discord ke %s: %s", discord_target_id, exc)
+            elif chat_id:
+                await self._send_to_discord(chat_id, discord_msg, is_absen=False)
+
+        return True
+
     async def send_test_materi(
         self,
         chat_id: Optional[int] = None,

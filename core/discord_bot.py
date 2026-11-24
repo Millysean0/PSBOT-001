@@ -179,7 +179,8 @@ class DiscordManager:
             embed.add_field(
                 name="🧪 Uji Coba Notifikasi (Test)",
                 value=(
-                    f"`{self.command_prefix}testmatkul` : Simulasi notifikasi presensi/matkul dibuka\n"
+                    f"`{self.command_prefix}testmatkul` : Simulasi notifikasi presensi dibuka\n"
+                    f"`{self.command_prefix}testabsen` : Simulasi notifikasi presensi berhasil dicatat\n"
                     f"`{self.command_prefix}testmateri` : Simulasi notifikasi materi baru (+ contoh PDF)\n"
                     f"`{self.command_prefix}testtugas` : Simulasi notifikasi tugas baru (+ contoh PDF)"
                 ),
@@ -521,10 +522,17 @@ class DiscordManager:
                 )
                 await ctx.reply(embed=embed)
 
-        @self.bot.command(name="testmatkul", aliases=["testpresensi", "testabsen"])
+        @self.bot.command(name="testmatkul", aliases=["testpresensi"])
         async def cmd_testmatkul(ctx: commands.Context) -> None:
             if self.notifier:
                 await self.notifier.send_test_matkul(target_platform="discord", discord_target_id=str(ctx.channel.id))
+            else:
+                await ctx.reply("❌ Notifier belum siap.")
+
+        @self.bot.command(name="testabsen")
+        async def cmd_testabsen(ctx: commands.Context) -> None:
+            if self.notifier:
+                await self.notifier.send_test_absen(target_platform="discord", discord_target_id=str(ctx.channel.id))
             else:
                 await ctx.reply("❌ Notifier belum siap.")
 

@@ -206,6 +206,10 @@ class WhatsAppManager:
                 self._process_testmatkul_command(chat_jid, is_group)
                 return
 
+            if re.match(r"^[-/]?testabsen\b", text, re.IGNORECASE):
+                self._process_testabsen_command(chat_jid, is_group)
+                return
+
             if re.match(r"^[-/]?testmateri\b", text, re.IGNORECASE):
                 self._process_testmateri_command(chat_jid, is_group)
                 return
@@ -383,6 +387,17 @@ class WhatsAppManager:
             msg = "Presensi dibuka ❗\nMatkul: Workshop Pemrograman Web\nWaktu: " + datetime.now().strftime("%H:%M:%S") + "\nMinggu: 14"
             if is_group:
                 msg += "\n\n@all"
+            self._send_reply_sync(chat_jid, msg)
+
+    def _process_testabsen_command(self, chat_jid: str, is_group: bool) -> None:
+        """Menangani perintah -testabsen di WhatsApp."""
+        if self.tg_notifier and self.loop:
+            asyncio.run_coroutine_threadsafe(
+                self.tg_notifier.send_test_absen(target_platform="whatsapp", is_group=is_group, wa_chat_id=chat_jid),
+                self.loop,
+            )
+        else:
+            msg = "✅ *Presensi Berhasil Dicatat !!!*\n\n*Matkul:* Workshop Pemrograman Web\n*Waktu:* " + datetime.now().strftime("%d-%m-%Y %H:%M:%S")
             self._send_reply_sync(chat_jid, msg)
 
     def _process_testmateri_command(self, chat_jid: str, is_group: bool) -> None:

@@ -1518,6 +1518,16 @@ async def cmd_testmatkul(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await notifier.send_test_matkul(chat_id=user.id, target_platform="telegram")
 
 
+async def cmd_testabsen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler /testabsen: Menguji tampilan format notifikasi konfirmasi presensi berhasil dicatat."""
+    user = update.effective_user
+    if not user:
+        return
+    notifier: Notifier = context.bot_data.get("notifier")
+    if notifier:
+        await notifier.send_test_absen(chat_id=user.id, target_platform="telegram")
+
+
 async def cmd_testmateri(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler /testmateri: Menguji tampilan format notifikasi materi baru beserta contoh file PDF."""
     user = update.effective_user
