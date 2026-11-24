@@ -53,6 +53,9 @@ from handlers.commands import (
     cmd_skem,
     cmd_start,
     cmd_status,
+    cmd_testmateri,
+    cmd_testmatkul,
+    cmd_testtugas,
     cmd_tugas,
     cmd_unconnect,
     cmd_unmute,
@@ -166,6 +169,9 @@ async def post_init(application: Application) -> None:
         BotCommand("pause", "Jeda background polling"),
         BotCommand("resume", "Lanjutkan background polling"),
         BotCommand("skem", "Pantau SKEM (/skem <nrp>) / Cek (/skem check)"),
+        BotCommand("testmatkul", "Test bentuk notifikasi presensi dibuka"),
+        BotCommand("testmateri", "Test bentuk notifikasi materi baru (+PDF)"),
+        BotCommand("testtugas", "Test bentuk notifikasi tugas baru (+PDF)"),
         BotCommand("logout", "Logout & hapus kredensial"),
     ]
     try:
@@ -352,6 +358,8 @@ def main() -> None:
         config_path="config.json",
         discord_client=discord_manager,
     )
+    if discord_manager:
+        discord_manager.notifier = notifier
     if wa_manager:
         wa_manager.tg_notifier = notifier
 
@@ -394,6 +402,9 @@ def main() -> None:
     application.add_handler(CommandHandler("resume", cmd_resume))
     application.add_handler(CommandHandler("debug", cmd_debug))
     application.add_handler(CommandHandler("skem", cmd_skem))
+    application.add_handler(CommandHandler("testmatkul", cmd_testmatkul))
+    application.add_handler(CommandHandler("testmateri", cmd_testmateri))
+    application.add_handler(CommandHandler("testtugas", cmd_testtugas))
 
     # Registrasi Callback Query Handler
     application.add_handler(CallbackQueryHandler(handle_callback_query))

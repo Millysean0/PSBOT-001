@@ -34,9 +34,15 @@
 
 ### 4. Integrasi Multi-Platform Cerdas (Telegram + WhatsApp + Discord)
 - Hubungkan akun Telegram Anda ke WhatsApp atau channel Discord dengan 1 kali ketik via perintah `/connect` (mendapatkan kode `ETH-XXXXXX`).
-- Bot Discord mendukung perintah lengkap: `!help`, `!connect`, `!matkul`, `!tugas`, `!deadline`, `!absen`, `!status`, `!ping`, dan `!login`.
+- Bot Discord mendukung perintah lengkap: `!help`, `!connect`, `!matkul`, `!tugas`, `!deadline`, `!absen`, `!status`, `!ping`, `!login`, serta uji coba notifikasi `!testmatkul`, `!testmateri`, dan `!testtugas`.
 
-### 5. Konfigurasi Fleksibel via `config.json` & `.env`
+### 5. Fitur Simulasi & Uji Coba Bentuk Notifikasi (Test Notif)
+Tersedia perintah pengujian di seluruh platform (WhatsApp, Telegram, Discord):
+- `-testmatkul` / `/testmatkul` / `!testmatkul`: Memanggil dan menguji tampilan notifikasi presensi/kuliah dibuka.
+- `-testmateri` / `/testmateri` / `!testmateri`: Memanggil notifikasi materi baru dan mengirim contoh file lampiran PDF.
+- `-testtugas` / `/testtugas` / `!testtugas`: Memanggil notifikasi tugas baru dan mengirim contoh file lampiran PDF petunjuk soal.
+
+### 6. Konfigurasi Fleksibel via `config.json` & `.env`
 - Pengaturan non-rahasia dipisahkan dari `.env` ke `config.json`.
 - Pengguna dapat mengaktifkan atau menonaktifkan fitur sinkronisasi WhatsApp, Discord, auto-download materi, auto-download tugas, dan interval polling hanya dengan mengubah nilai `true`/`false`.
 

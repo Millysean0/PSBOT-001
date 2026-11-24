@@ -646,3 +646,249 @@ class Notifier:
         await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
         await self._send_to_discord(chat_id, wa_msg, is_absen=False)
         return tg_success
+
+    # =========================================================================
+    # Fitur Simulasi & Uji Coba Bentuk Notifikasi (Test Notif)
+    # =========================================================================
+
+    @staticmethod
+    def create_sample_pdf(title: str, subtitle: str, content: str) -> bytes:
+        """Membuat file contoh PDF valid (PDF-1.4) murni dalam bentuk bytes."""
+        content_stream = (
+            f"BT\n"
+            f"/F1 18 Tf\n"
+            f"50 720 Td\n"
+            f"({title}) Tj\n"
+            f"ET\n"
+            f"BT\n"
+            f"/F1 12 Tf\n"
+            f"50 690 Td\n"
+            f"({subtitle}) Tj\n"
+            f"ET\n"
+            f"BT\n"
+            f"/F1 10 Tf\n"
+            f"50 650 Td\n"
+            f"({content}) Tj\n"
+            f"ET\n"
+        )
+        b_stream = content_stream.encode("latin-1", "replace")
+        stream_len = len(b_stream)
+        pdf = (
+            b"%PDF-1.4\n"
+            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+            b"4 0 obj\n<< /Length " + str(stream_len).encode() + b" >>\nstream\n"
+            + b_stream
+            + b"\nendstream\nendobj\n"
+            b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+            b"xref\n0 6\n0000000000 65535 f \n"
+            b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n560\n%%EOF\n"
+        )
+        return pdf
+
+    async def send_test_matkul(
+        self,
+        chat_id: Optional[int] = None,
+        target_platform: str = "all",
+        is_group: bool = False,
+        wa_chat_id: Optional[str] = None,
+        discord_target_id: Optional[str] = None,
+    ) -> bool:
+        """Mengirim simulasi bentuk notifikasi presensi/matkul dibuka ke target."""
+        mk_name = "Workshop Pemrograman Web"
+        jam = datetime.now().strftime("%H:%M:%S")
+        minggu_val = "14"
+
+        # 1. Telegram
+        if target_platform in ("all", "telegram") and chat_id:
+            tg_msg = (
+                "📢 <b>Presensi dibuka ❗</b>\n\n"
+                f"<b>Matkul:</b> {html.escape(mk_name)}\n"
+                f"<b>Waktu:</b> {html.escape(str(jam))}\n"
+                f"<b>Minggu:</b> {html.escape(minggu_val)}"
+            )
+            await self.send_text(chat_id, tg_msg)
+
+        # 2. WhatsApp
+        if target_platform in ("all", "whatsapp"):
+            wa_msg = (
+                "Presensi dibuka ❗\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {jam}\n"
+                f"Minggu: {minggu_val}"
+            )
+            if is_group:
+                wa_msg += "\n\n@all"
+
+            if wa_chat_id and self.wa_client:
+                try:
+                    await self.wa_client.send_announcement(wa_chat_id, wa_msg)
+                except Exception as exc:
+                    logger.error("Gagal kirim test matkul WA ke %s: %s", wa_chat_id, exc)
+            elif chat_id:
+                await self._send_to_whatsapp(chat_id, wa_msg, is_absen=True)
+
+        # 3. Discord
+        if target_platform in ("all", "discord"):
+            discord_msg = (
+                "Presensi dibuka ❗\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {jam}\n"
+                f"Minggu: {minggu_val}\n\n@all"
+            )
+            if discord_target_id and self.discord_client:
+                try:
+                    await self.discord_client.send_announcement(discord_target_id, discord_msg, is_absen=True)
+                except Exception as exc:
+                    logger.error("Gagal kirim test matkul Discord ke %s: %s", discord_target_id, exc)
+            elif chat_id:
+                await self._send_to_discord(chat_id, discord_msg, is_absen=True)
+
+        return True
+
+    async def send_test_materi(
+        self,
+        chat_id: Optional[int] = None,
+        target_platform: str = "all",
+        is_group: bool = False,
+        wa_chat_id: Optional[str] = None,
+        discord_target_id: Optional[str] = None,
+    ) -> bool:
+        """Mengirim simulasi bentuk notifikasi materi baru beserta contoh file PDF."""
+        matkul = "Sistem Terdistribusi"
+        judul = "Pertemuan 14 - Microservices Architecture"
+        filename = "Materi_Pertemuan_14_Microservices.pdf"
+        pdf_bytes = self.create_sample_pdf(
+            title="Materi Kuliah PENS",
+            subtitle=matkul,
+            content=f"Contoh Dokumen Bahan Ajar: {judul}",
+        )
+
+        # 1. Telegram
+        if target_platform in ("all", "telegram") and chat_id:
+            tg_msg = (
+                "📚 <b>Materi baru ditambahkan !!!</b>\n\n"
+                f"<b>Matkul:</b> {html.escape(matkul)}\n"
+                f"<b>Materi:</b> {html.escape(judul)}"
+            )
+            cap_tg = f"📄 <b>Materi:</b> {html.escape(judul)}\n📖 <i>{html.escape(matkul)}</i>"
+            await self.send_text(chat_id, tg_msg)
+            await self.send_document(chat_id, pdf_bytes, filename, cap_tg)
+
+        # 2. WhatsApp
+        if target_platform in ("all", "whatsapp"):
+            wa_msg = (
+                "📚 *Materi baru ditambahkan !!!*\n\n"
+                f"*Matkul:* {matkul}\n"
+                f"*Materi:* {judul}"
+            )
+            cap_wa = f"📄 *Materi:* {judul}\n📖 _{matkul}_"
+
+            if wa_chat_id and self.wa_client:
+                try:
+                    await self.wa_client.send_announcement(wa_chat_id, wa_msg)
+                    await self.wa_client.send_file(wa_chat_id, pdf_bytes, filename, cap_wa)
+                except Exception as exc:
+                    logger.error("Gagal kirim test materi WA ke %s: %s", wa_chat_id, exc)
+            elif chat_id:
+                await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
+                await self._send_file_to_whatsapp(chat_id, pdf_bytes, filename, cap_wa)
+
+        # 3. Discord
+        if target_platform in ("all", "discord"):
+            discord_msg = (
+                "📚 **Materi baru ditambahkan !!!**\n\n"
+                f"**Matkul:** {matkul}\n"
+                f"**Materi:** {judul}"
+            )
+            cap_discord = f"📄 **Materi:** {judul}\n📖 *{matkul}*"
+
+            if discord_target_id and self.discord_client:
+                try:
+                    await self.discord_client.send_announcement(discord_target_id, discord_msg, is_absen=False)
+                    await self.discord_client.send_file(discord_target_id, pdf_bytes, filename, cap_discord)
+                except Exception as exc:
+                    logger.error("Gagal kirim test materi Discord ke %s: %s", discord_target_id, exc)
+            elif chat_id:
+                await self._send_to_discord(chat_id, discord_msg, is_absen=False)
+                await self._send_file_to_discord(chat_id, pdf_bytes, filename, cap_discord)
+
+        return True
+
+    async def send_test_tugas(
+        self,
+        chat_id: Optional[int] = None,
+        target_platform: str = "all",
+        is_group: bool = False,
+        wa_chat_id: Optional[str] = None,
+        discord_target_id: Optional[str] = None,
+    ) -> bool:
+        """Mengirim simulasi bentuk notifikasi tugas baru beserta contoh file PDF soal."""
+        matkul = "Proyek Akhir Terapan"
+        judul = "Tugas 4 - Implementasi REST API & Unit Testing"
+        deskripsi = "Silakan kumpulkan laporan implementasi kode program serta tautan repositori GitHub sebelum batas waktu."
+        deadline = "30 Nov 2026, 23:59 WIB"
+        filename = "Petunjuk_Tugas_4_REST_API.pdf"
+        pdf_bytes = self.create_sample_pdf(
+            title="Petunjuk Tugas Kuliah PENS",
+            subtitle=matkul,
+            content=f"Contoh Dokumen Soal & Petunjuk: {judul}",
+        )
+
+        # 1. Telegram
+        if target_platform in ("all", "telegram") and chat_id:
+            tg_msg = (
+                "📝 <b>Tugas Baru ditambahkan !!!</b>\n\n"
+                f"<b>Matkul:</b> {html.escape(matkul)}\n"
+                f"<b>Judul:</b> {html.escape(judul)}\n"
+                f"<b>Deskripsi:</b>\n{html.escape(deskripsi)}\n\n"
+                f"⏰ <b>Batas Pengumpulan:</b> {html.escape(deadline)}"
+            )
+            cap_tg = f"📎 <b>Lampiran:</b> {html.escape(filename)}\n📌 <i>{html.escape(judul)}</i>"
+            await self.send_text(chat_id, tg_msg)
+            await self.send_document(chat_id, pdf_bytes, filename, cap_tg)
+
+        # 2. WhatsApp
+        if target_platform in ("all", "whatsapp"):
+            wa_msg = (
+                "📝 *Tugas Baru ditambahkan !!!*\n\n"
+                f"*Matkul:* {matkul}\n"
+                f"*Judul:* {judul}\n"
+                f"*Deskripsi:*\n{deskripsi}\n\n"
+                f"⏰ *Batas Pengumpulan:* {deadline}"
+            )
+            cap_wa = f"📎 *Lampiran:* {filename}\n📌 _{judul}_"
+
+            if wa_chat_id and self.wa_client:
+                try:
+                    await self.wa_client.send_announcement(wa_chat_id, wa_msg)
+                    await self.wa_client.send_file(wa_chat_id, pdf_bytes, filename, cap_wa)
+                except Exception as exc:
+                    logger.error("Gagal kirim test tugas WA ke %s: %s", wa_chat_id, exc)
+            elif chat_id:
+                await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
+                await self._send_file_to_whatsapp(chat_id, pdf_bytes, filename, cap_wa)
+
+        # 3. Discord
+        if target_platform in ("all", "discord"):
+            discord_msg = (
+                "📝 **Tugas Baru ditambahkan !!!**\n\n"
+                f"**Matkul:** {matkul}\n"
+                f"**Judul:** {judul}\n"
+                f"**Deskripsi:**\n{deskripsi}\n\n"
+                f"⏰ **Batas Pengumpulan:** {deadline}"
+            )
+            cap_discord = f"📎 **Lampiran:** {filename}\n📌 *{judul}*"
+
+            if discord_target_id and self.discord_client:
+                try:
+                    await self.discord_client.send_announcement(discord_target_id, discord_msg, is_absen=False)
+                    await self.discord_client.send_file(discord_target_id, pdf_bytes, filename, cap_discord)
+                except Exception as exc:
+                    logger.error("Gagal kirim test tugas Discord ke %s: %s", discord_target_id, exc)
+            elif chat_id:
+                await self._send_to_discord(chat_id, discord_msg, is_absen=False)
+                await self._send_file_to_discord(chat_id, pdf_bytes, filename, cap_discord)
+
+        return True

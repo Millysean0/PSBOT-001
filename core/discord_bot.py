@@ -61,6 +61,7 @@ class DiscordManager:
         command_prefix: str = "!",
         status_activity: str = "ETHOL PENS Academic",
         admin_user_id: Optional[int] = None,
+        notifier: Optional[Any] = None,
     ) -> None:
         self.token = token.strip()
         self.db = db
@@ -69,6 +70,7 @@ class DiscordManager:
         self.command_prefix = command_prefix or "!"
         self.status_activity = status_activity
         self.admin_user_id = admin_user_id
+        self.notifier = notifier
 
         # Setup Discord Bot client dengan Intents yang tepat
         intents = discord.Intents.default()
@@ -171,6 +173,15 @@ class DiscordManager:
                 value=(
                     f"`{self.command_prefix}absen` : Cek status & toggle Auto-Absen\n"
                     f"`{self.command_prefix}ping` : Cek latensi bot"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="🧪 Uji Coba Notifikasi (Test)",
+                value=(
+                    f"`{self.command_prefix}testmatkul` : Simulasi notifikasi presensi/matkul dibuka\n"
+                    f"`{self.command_prefix}testmateri` : Simulasi notifikasi materi baru (+ contoh PDF)\n"
+                    f"`{self.command_prefix}testtugas` : Simulasi notifikasi tugas baru (+ contoh PDF)"
                 ),
                 inline=False,
             )
@@ -509,6 +520,27 @@ class DiscordManager:
                     color=discord.Color.teal(),
                 )
                 await ctx.reply(embed=embed)
+
+        @self.bot.command(name="testmatkul", aliases=["testpresensi", "testabsen"])
+        async def cmd_testmatkul(ctx: commands.Context) -> None:
+            if self.notifier:
+                await self.notifier.send_test_matkul(target_platform="discord", discord_target_id=str(ctx.channel.id))
+            else:
+                await ctx.reply("❌ Notifier belum siap.")
+
+        @self.bot.command(name="testmateri")
+        async def cmd_testmateri(ctx: commands.Context) -> None:
+            if self.notifier:
+                await self.notifier.send_test_materi(target_platform="discord", discord_target_id=str(ctx.channel.id))
+            else:
+                await ctx.reply("❌ Notifier belum siap.")
+
+        @self.bot.command(name="testtugas")
+        async def cmd_testtugas(ctx: commands.Context) -> None:
+            if self.notifier:
+                await self.notifier.send_test_tugas(target_platform="discord", discord_target_id=str(ctx.channel.id))
+            else:
+                await ctx.reply("❌ Notifier belum siap.")
 
     # =========================================================================
     # Pengiriman Notifikasi & Announcement ke Discord

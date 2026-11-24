@@ -202,6 +202,18 @@ class WhatsAppManager:
                 self._process_status_command(chat_jid)
                 return
 
+            if re.match(r"^[-/]?testmatkul\b", text, re.IGNORECASE):
+                self._process_testmatkul_command(chat_jid, is_group)
+                return
+
+            if re.match(r"^[-/]?testmateri\b", text, re.IGNORECASE):
+                self._process_testmateri_command(chat_jid, is_group)
+                return
+
+            if re.match(r"^[-/]?testtugas\b", text, re.IGNORECASE):
+                self._process_testtugas_command(chat_jid, is_group)
+                return
+
             if re.match(r"^[-/]?testnotif\b", text, re.IGNORECASE):
                 self._process_testnotif_command(chat_jid)
                 return
@@ -359,6 +371,35 @@ class WhatsAppManager:
                 "Gunakan *-connect <kode>* untuk menautkan."
             )
         self._send_reply_sync(chat_jid, reply)
+
+    def _process_testmatkul_command(self, chat_jid: str, is_group: bool) -> None:
+        """Menangani perintah -testmatkul di WhatsApp."""
+        if self.tg_notifier and self.loop:
+            asyncio.run_coroutine_threadsafe(
+                self.tg_notifier.send_test_matkul(target_platform="whatsapp", is_group=is_group, wa_chat_id=chat_jid),
+                self.loop,
+            )
+        else:
+            msg = "Presensi dibuka ❗\nMatkul: Workshop Pemrograman Web\nWaktu: " + datetime.now().strftime("%H:%M:%S") + "\nMinggu: 14"
+            if is_group:
+                msg += "\n\n@all"
+            self._send_reply_sync(chat_jid, msg)
+
+    def _process_testmateri_command(self, chat_jid: str, is_group: bool) -> None:
+        """Menangani perintah -testmateri di WhatsApp."""
+        if self.tg_notifier and self.loop:
+            asyncio.run_coroutine_threadsafe(
+                self.tg_notifier.send_test_materi(target_platform="whatsapp", is_group=is_group, wa_chat_id=chat_jid),
+                self.loop,
+            )
+
+    def _process_testtugas_command(self, chat_jid: str, is_group: bool) -> None:
+        """Menangani perintah -testtugas di WhatsApp."""
+        if self.tg_notifier and self.loop:
+            asyncio.run_coroutine_threadsafe(
+                self.tg_notifier.send_test_tugas(target_platform="whatsapp", is_group=is_group, wa_chat_id=chat_jid),
+                self.loop,
+            )
 
     def _resolve_nrp_for_chat(self, chat_jid: str, provided_nrp: str) -> tuple[str, int | None]:
         """Mencari NRP target dan user_id dari chat_jid menggunakan db.get_user_nrp().

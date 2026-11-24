@@ -1503,3 +1503,37 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode=ParseMode.HTML,
     )
 
+
+# =============================================================================
+# Handler Uji Coba Bentuk Notifikasi (Test Notif)
+# =============================================================================
+
+async def cmd_testmatkul(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler /testmatkul: Menguji tampilan format notifikasi presensi/matkul dibuka."""
+    user = update.effective_user
+    if not user:
+        return
+    notifier: Notifier = context.bot_data.get("notifier")
+    if notifier:
+        await notifier.send_test_matkul(chat_id=user.id, target_platform="telegram")
+
+
+async def cmd_testmateri(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler /testmateri: Menguji tampilan format notifikasi materi baru beserta contoh file PDF."""
+    user = update.effective_user
+    if not user:
+        return
+    notifier: Notifier = context.bot_data.get("notifier")
+    if notifier:
+        await notifier.send_test_materi(chat_id=user.id, target_platform="telegram")
+
+
+async def cmd_testtugas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler /testtugas: Menguji tampilan format notifikasi tugas baru beserta contoh file PDF soal."""
+    user = update.effective_user
+    if not user:
+        return
+    notifier: Notifier = context.bot_data.get("notifier")
+    if notifier:
+        await notifier.send_test_tugas(chat_id=user.id, target_platform="telegram")
+
