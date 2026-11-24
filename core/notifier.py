@@ -601,9 +601,9 @@ class Notifier:
                 f"<b>Waktu:</b> {now_str}"
             )
             wa_text = (
-                "✅ *Presensi Berhasil Dicatat !!!*\n\n"
-                f"*Matkul:* {mk_name}\n"
-                f"*Waktu:* {now_str}"
+                "📢 Presensi dibuka ❗\n\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {now_str}"
             )
             discord_text = (
                 "✅ **Presensi Berhasil Dicatat !!!**\n\n"
@@ -771,9 +771,9 @@ class Notifier:
         # 2. WhatsApp
         if target_platform in ("all", "whatsapp"):
             wa_msg = (
-                "✅ *Presensi Berhasil Dicatat !!!*\n\n"
-                f"*Matkul:* {mk_name}\n"
-                f"*Waktu:* {now_str}"
+                "📢 Presensi dibuka ❗\n\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {now_str}"
             )
             if wa_chat_id and self.wa_client:
                 try:
