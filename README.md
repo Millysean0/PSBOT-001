@@ -136,7 +136,7 @@ PSBOT-001/
 
 1. **Unduh dan jalankan skrip instalasi otomatis**:
    ```bash
-   git clone https://github.com/username/PSBOT-001.git
+   git clone https://github.com/Millysean0/PSBOT-001.git
    cd PSBOT-001
    chmod +x setup_linux.sh
    ./setup_linux.sh
@@ -191,7 +191,7 @@ sudo systemctl start psbot
 
 2. Clone repositori dan jalankan skrip setup:
    ```bash
-   git clone https://github.com/username/PSBOT-001.git
+   git clone https://github.com/Millysean0/PSBOT-001.git
    cd PSBOT-001
    chmod +x setup_termux.sh
    ./setup_termux.sh
