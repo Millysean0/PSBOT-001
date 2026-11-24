@@ -10,8 +10,6 @@
 
 **PSBOT-001** adalah bot asisten akademik cerdas berbasis **Telegram**, **WhatsApp**, dan **Discord** yang terintegrasi langsung dengan portal pembelajaran **ETHOL PENS** (*EEPIS Online Learning*) dan portal pemantauan **SKEM** (*Sistem Kredit Kegiatan Mahasiswa*) Politeknik Elektronika Negeri Surabaya.
 
-Bot ini dirancang dengan arsitektur multi-user yang hemat sumber daya (RAM < 150 MB), mendukung autentikasi resmi **CAS SSO (login.pens.ac.id)**, enkripsi kredensial **Fernet AES**, dan sinkronisasi lintas platform secara *real-time*.
-
 ---
 
 ## 🚀 Fitur Utama
