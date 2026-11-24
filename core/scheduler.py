@@ -52,6 +52,7 @@ class BotScheduler:
         self.auto_absen_enabled_global: bool = True
         self.skem_monitor_enabled: bool = True
         self._last_tugas_poll: Dict[int, float] = {}
+        self._last_dashboard_poll: Dict[int, float] = {}
         self._poll_lock = asyncio.Lock()
 
         self._load_config()
@@ -81,7 +82,7 @@ class BotScheduler:
                     cfg = json.load(f)
                     polling = cfg.get("polling", {})
                     features = cfg.get("features", {})
-                    self.poll_interval = int(polling.get("ethol_poll_interval_seconds", 30))
+                    self.poll_interval = int(polling.get("ethol_poll_interval_seconds", 5))
                     self.skem_poll_interval = int(polling.get("skem_poll_interval_seconds", 300))
                     self.cooldown_seconds = int(polling.get("presensi_cooldown_seconds", 300))
                     self.auto_absen_enabled_global = bool(features.get("auto_absen_enabled", True))
@@ -98,9 +99,9 @@ class BotScheduler:
                 seconds=self.poll_interval,
                 id="ethol_polling_job",
                 replace_existing=True,
-                max_instances=3,
+                max_instances=1,
                 coalesce=True,
-                misfire_grace_time=60,
+                misfire_grace_time=15,
             )
 
             if self.skem_monitor_enabled:
@@ -161,40 +162,47 @@ class BotScheduler:
                     if not is_active:
                         continue
 
-                    # 2. Ambil data notifikasi dashboard
-                    dashboard_data = await asyncio.to_thread(self.client.fetch_dashboard, user_id)
-                    current_hash = dashboard_data.get("content_hash", "")
-                    last_hash = user.get("last_seen_hash", "")
+                    # 2. Ambil data notifikasi dashboard (interval 20 detik agar performa ringan & efisien)
+                    now_ts = time.time()
+                    last_dash = self._last_dashboard_poll.get(user_id, 0.0)
                     new_sent_count = 0
+                    current_hash = ""
 
-                    # 3. Notifikasi dashboard
-                    if current_hash and current_hash != last_hash:
-                        notifications = dashboard_data.get("notifications", [])
-                        for item in notifications:
-                            should_send, reason, is_priority = self.filter_engine.should_notify_user(
-                                user_id, item, self.db
-                            )
-                            if should_send:
-                                sent = await self.notifier.notify_item(
-                                    user_id, item, is_priority=is_priority, ethol_client=self.client
+                    if now_ts - last_dash >= 20.0:
+                        self._last_dashboard_poll[user_id] = now_ts
+                        dashboard_data = await asyncio.to_thread(self.client.fetch_dashboard, user_id)
+                        current_hash = dashboard_data.get("content_hash", "")
+                        last_hash = user.get("last_seen_hash", "")
+
+                        # 3. Notifikasi dashboard
+                        if current_hash and current_hash != last_hash:
+                            notifications = dashboard_data.get("notifications", [])
+                            for item in notifications:
+                                should_send, reason, is_priority = self.filter_engine.should_notify_user(
+                                    user_id, item, self.db
                                 )
-                                if sent:
-                                    new_sent_count += 1
+                                if should_send:
+                                    sent = await self.notifier.notify_item(
+                                        user_id, item, is_priority=is_priority, ethol_client=self.client
+                                    )
+                                    if sent:
+                                        new_sent_count += 1
 
-                    # 4. Auto-Absen
+                    # 4. Auto-Absen & Poller Presensi (Dijalankan setiap 5 detik dengan respons kilat)
                     if self.auto_absen_enabled_global:
                         await self._process_user_auto_absen(user_id)
 
-                    # 5. Deteksi tugas yang baru dikumpulkan
+                    # 5. Deteksi tugas yang baru dikumpulkan (interval 300 detik)
                     await self._process_user_submitted_tasks(user_id)
 
-                    # 6. Update metrik polling di DB
-                    self.db.update_user_poll_metrics(
-                        user_id=user_id,
-                        last_seen_hash=current_hash if current_hash else None,
-                        last_poll_at=datetime.now().isoformat(),
-                        increment_sent=new_sent_count,
-                    )
+                    # 6. Update metrik polling di DB jika ada update
+                    if new_sent_count or current_hash:
+                        self.db.update_user_poll_metrics(
+                            user_id=user_id,
+                            last_seen_hash=current_hash if current_hash else None,
+                            last_poll_at=datetime.now().isoformat(),
+                            increment_sent=new_sent_count,
+                        )
 
                 except Exception as exc:
                     logger.error("[User %s] Error saat memproses polling: %s", user_id, exc, exc_info=True)
@@ -208,12 +216,20 @@ class BotScheduler:
                 pass
 
     async def _process_user_auto_absen(self, user_id: int) -> None:
-        """Memeriksa sesi presensi aktif dan submit otomatis."""
+        """Memeriksa sesi presensi aktif dan submit otomatis (berjalan tiap 5 detik)."""
         if not self.db.is_auto_absen_enabled(user_id):
             return
 
         active_sessions = await asyncio.to_thread(self.client.fetch_presensi_active, user_id)
+        courses = self.client.course_cache.get(user_id, [])
+        course_count = len(courses) if courses else 0
+
         if not active_sessions:
+            logger.info(
+                "[Poller] Refresh absensi berhasil (User %s | %d matkul dipantau - Status: Standby)",
+                user_id,
+                course_count,
+            )
             return
 
         now = time.time()
@@ -221,6 +237,7 @@ class BotScheduler:
             mk_code = str(presensi.get("mk_code", ""))
             mk_name = presensi.get("mk_name", "Mata Kuliah")
             key = str(presensi.get("key", ""))
+            minggu = presensi.get("minggu", "-")
 
             if key and self.db.is_presensi_session_completed(user_id, key):
                 continue
@@ -231,6 +248,12 @@ class BotScheduler:
             if elapsed < self.cooldown_seconds:
                 continue
 
+            logger.info(
+                "🚨 [Poller] Terdeteksi presensi terbuka: %s (Minggu %s) untuk User %s! Memproses auto-absen...",
+                mk_name,
+                minggu,
+                user_id,
+            )
             result = await asyncio.to_thread(self.client.submit_absen, user_id, presensi)
             success = result.get("success", False)
             already_attended = result.get("already_attended", False)
@@ -240,12 +263,14 @@ class BotScheduler:
             self.db.log_presensi(user_id, mk_code, mk_name, key, status_log, msg)
 
             if success and not already_attended:
-                logger.info("[User %s] Auto-absen berhasil untuk %s", user_id, mk_name)
+                logger.info("✅ [Poller] Auto-absen berhasil dicatat untuk %s (User %s)", mk_name, user_id)
                 await self.notifier.notify_presensi_result(user_id, mk_name, True, msg)
                 self.db.set_presensi_cooldown(user_id, mk_code, now + 43200)
             elif already_attended:
+                logger.info("ℹ️ [Poller] Sudah pernah absen untuk %s (User %s)", mk_name, user_id)
                 self.db.set_presensi_cooldown(user_id, mk_code, now + 43200)
             else:
+                logger.warning("⚠️ [Poller] Auto-absen gagal untuk %s (User %s): %s", mk_name, user_id, msg)
                 await self.notifier.notify_presensi_result(user_id, mk_name, False, msg)
                 self.db.set_presensi_cooldown(user_id, mk_code, now)
 

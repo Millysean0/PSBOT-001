@@ -14,7 +14,7 @@
     "auto_absen_enabled": true
   },
   "polling": {
-    "ethol_poll_interval_seconds": 30,
+    "ethol_poll_interval_seconds": 5,
     "skem_poll_interval_seconds": 300,
     "presensi_cooldown_seconds": 300,
     "tugas_submission_poll_interval_seconds": 300
@@ -23,9 +23,9 @@
     "base_url": "https://ethol.pens.ac.id",
     "login_url": "https://login.pens.ac.id/cas/login?service=https%3A%2F%2Fethol.pens.ac.id%2Fapi%2Fauth%2Fcas-callback",
     "cas_service_url": "https://ethol.pens.ac.id/api/auth/cas-callback",
-    "request_timeout_seconds": 15,
+    "request_timeout_seconds": 8,
     "retry_attempts": 2,
-    "retry_backoff_seconds": 2
+    "retry_backoff_seconds": 1
   },
   "skem": {
     "timeout_ms": 30000,

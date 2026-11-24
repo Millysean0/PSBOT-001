@@ -19,8 +19,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
+import concurrent.futures
 
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
 from utils.logger import setup_logger
@@ -109,6 +111,15 @@ class EtholClient:
                     "Connection": "keep-alive",
                 }
             )
+            # Pool adapter teroptimasi untuk performa multi-thread dan polling frekuensi tinggi
+            adapter = HTTPAdapter(
+                pool_connections=25,
+                pool_maxsize=25,
+                max_retries=0,
+                pool_block=False,
+            )
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
             self.sessions[user_id] = session
         return self.sessions[user_id]
 
@@ -138,9 +149,15 @@ class EtholClient:
         **kwargs: Any,
     ) -> Optional[requests.Response]:
         """Melakukan HTTP request dengan retry dan backoff untuk session pengguna."""
-        timeout = kwargs.pop("timeout", self.timeout)
+        raw_timeout = kwargs.pop("timeout", self.timeout)
+        if isinstance(raw_timeout, (int, float)):
+            timeout = (min(4.0, float(raw_timeout)), float(raw_timeout))
+        else:
+            timeout = raw_timeout
+
         max_retries = kwargs.pop("max_retries", self.retry_attempts)
         backoff = kwargs.pop("backoff", self.retry_backoff)
+        silent_error = kwargs.pop("silent_error", False)
 
         session = self.get_session(user_id)
 
@@ -149,24 +166,30 @@ class EtholClient:
                 response = session.request(method=method, url=url, timeout=timeout, **kwargs)
                 return response
             except (requests.exceptions.RequestException, requests.exceptions.Timeout) as exc:
-                logger.warning(
-                    "[User %s] Network error saat %s %s (Percobaan %d/%d): %s",
-                    user_id,
-                    method,
-                    url,
-                    attempt,
-                    max_retries,
-                    exc,
-                )
-                try:
-                    # Tutup socket koneksi lama yang terputus agar retry membuat koneksi baru
-                    session.close()
-                except Exception:
-                    pass
+                if not silent_error:
+                    if attempt == max_retries and max_retries == 1:
+                        logger.debug(
+                            "[User %s] Network timeout saat %s %s: %s",
+                            user_id,
+                            method,
+                            url,
+                            exc,
+                        )
+                    else:
+                        logger.warning(
+                            "[User %s] Network error saat %s %s (Percobaan %d/%d): %s",
+                            user_id,
+                            method,
+                            url,
+                            attempt,
+                            max_retries,
+                            exc,
+                        )
                 if attempt < max_retries:
-                    time.sleep(backoff)
+                    time.sleep(min(backoff, 1.0))
                 else:
-                    logger.error("[User %s] Semua percobaan (%d) gagal untuk %s %s", user_id, max_retries, method, url)
+                    if not silent_error and max_retries > 1:
+                        logger.error("[User %s] Semua percobaan (%d) gagal untuk %s %s", user_id, max_retries, method, url)
         return None
 
     def _api_request(
@@ -704,31 +727,33 @@ class EtholClient:
 
         all_tasks: List[Dict[str, Any]] = []
 
-        for c in courses_to_query:
+        def _fetch_course_tasks(c: Dict[str, Any]) -> List[Dict[str, Any]]:
             kuliah_id = c["nomor"]
             schema = c.get("jenis_schema", 2)
             mk_name = c.get("nama", "Mata Kuliah")
 
-            # Per-kuliah timeout 12s & max 1 retry agar satu endpoint bermasalah tidak memblokir antrean
+            # Per-kuliah timeout 8s & max 1 retry dengan silent_error agar tidak membuat log gaduh
             resp = self._api_request(
                 "GET",
                 "/tugas",
                 user_id=user_id,
                 params={"kuliah": kuliah_id, "jenisSchema": schema},
-                timeout=12,
+                timeout=8,
                 max_retries=1,
+                silent_error=True,
             )
             if not resp or resp.status_code != 200:
-                continue
+                return []
 
             try:
                 task_items = resp.json()
             except Exception:
-                continue
+                return []
 
             if not isinstance(task_items, list):
-                continue
+                return []
 
+            c_tasks: List[Dict[str, Any]] = []
             for t in task_items:
                 if not isinstance(t, dict):
                     continue
@@ -813,7 +838,7 @@ class EtholClient:
                                 if p:
                                     submitted_files.append({"nama": fname_clean, "url": p})
 
-                all_tasks.append(
+                c_tasks.append(
                     {
                         "id": f"tugas_{t_id}",
                         "raw_id": t_id,
@@ -838,6 +863,19 @@ class EtholClient:
                         "link": f"{self.base_url}/tugas",
                     }
                 )
+            return c_tasks
+
+        # Ambil tugas seluruh matkul secara paralel multi-thread agar cepat & tidak blocking
+        max_workers = min(len(courses_to_query), 6) if courses_to_query else 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_fetch_course_tasks, c) for c in courses_to_query]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    c_res = future.result()
+                    if c_res:
+                        all_tasks.extend(c_res)
+                except Exception:
+                    pass
 
         # Urutkan tugas: yang belum dikumpulkan & deadline terdekat didahulukan
         all_tasks.sort(key=lambda x: (x["is_submitted"], x["hours_left"] if not x["is_overdue"] else 999999))
@@ -953,50 +991,75 @@ class EtholClient:
 
         return all_materials
 
-    def fetch_presensi_active(self, user_id: int) -> List[Dict[str, Any]]:
-        """Mendeteksi sesi presensi yang sedang terbuka untuk diabsen oleh pengguna."""
-        courses = self.fetch_matkul(user_id)
-        if not courses:
-            return []
+    def _check_single_course_presensi(self, user_id: int, c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Mengecek status presensi aktif satu mata kuliah dengan timeout cepat dan non-blocking."""
+        kuliah_id = c["nomor"]
+        schema = c.get("jenis_schema", 2)
+        mk_name = c.get("nama", "Mata Kuliah")
 
-        active_sessions: List[Dict[str, Any]] = []
+        # 1. Cek via /presensi/terakhir-kuliah (timeout 4 detik, 1 retry, silent agar log bersih)
+        resp_t = self._api_request(
+            "GET",
+            "/presensi/terakhir-kuliah",
+            user_id=user_id,
+            params={"kuliah": kuliah_id, "jenis_schema": schema},
+            timeout=4.0,
+            max_retries=1,
+            silent_error=True,
+        )
 
-        for c in courses:
-            kuliah_id = c["nomor"]
-            schema = c.get("jenis_schema", 2)
-            mk_name = c.get("nama", "Mata Kuliah")
+        is_open = False
+        key = ""
+        jam = datetime.now().strftime("%H:%M:%S")
+        minggu = "-"
 
-            # 1. Cek via /presensi/terakhir-kuliah
-            resp_t = self._api_request(
+        if resp_t and resp_t.status_code == 200:
+            try:
+                data_t = resp_t.json()
+                if isinstance(data_t, dict) and data_t.get("ditemukan"):
+                    if data_t.get("open"):
+                        is_open = True
+                        key = data_t.get("key") or ""
+                        minggu_val = data_t.get("minggu") or data_t.get("pertemuan") or "-"
+                        minggu = str(minggu_val)
+                        jam_val = (
+                            data_t.get("jam_buka")
+                            or data_t.get("waktu_buka")
+                            or data_t.get("created_at")
+                            or data_t.get("tanggal")
+                        )
+                        if jam_val:
+                            if "T" in str(jam_val):
+                                jam = str(jam_val).split("T")[1][:8]
+                            elif " " in str(jam_val):
+                                jam = str(jam_val).split(" ")[1][:8]
+                            else:
+                                jam = str(jam_val)[:8]
+            except Exception:
+                pass
+
+        # 2. Cek juga via /presensi/aktif-kuliah jika belum terdeteksi open
+        if not is_open:
+            resp_a = self._api_request(
                 "GET",
-                "/presensi/terakhir-kuliah",
+                "/presensi/aktif-kuliah",
                 user_id=user_id,
                 params={"kuliah": kuliah_id, "jenis_schema": schema},
+                timeout=4.0,
+                max_retries=1,
+                silent_error=True,
             )
-
-            is_open = False
-            key = ""
-            jam = datetime.now().strftime("%H:%M:%S")
-            minggu = "-"
-
-            if resp_t and resp_t.status_code == 200:
+            if resp_a and resp_a.status_code == 200:
                 try:
-                    data_t = resp_t.json()
-                    if isinstance(data_t, dict) and data_t.get("ditemukan"):
-                        if data_t.get("open"):
-                            is_open = True
-                            key = data_t.get("key") or ""
-                            # Ambil minggu dan jam dari response
-                            minggu_val = data_t.get("minggu") or data_t.get("pertemuan") or "-"
+                    data_a = resp_a.json()
+                    if isinstance(data_a, list) and data_a:
+                        is_open = True
+                        if not key and isinstance(data_a[0], dict):
+                            key = data_a[0].get("key", "")
+                            minggu_val = data_a[0].get("minggu") or data_a[0].get("pertemuan") or "-"
                             minggu = str(minggu_val)
-                            jam_val = (
-                                data_t.get("jam_buka")
-                                or data_t.get("waktu_buka")
-                                or data_t.get("created_at")
-                                or data_t.get("tanggal")
-                            )
+                            jam_val = data_a[0].get("jam_buka") or data_a[0].get("waktu_buka") or data_a[0].get("created_at")
                             if jam_val:
-                                # Ambil bagian waktu saja jika format datetime
                                 if "T" in str(jam_val):
                                     jam = str(jam_val).split("T")[1][:8]
                                 elif " " in str(jam_val):
@@ -1006,49 +1069,41 @@ class EtholClient:
                 except Exception:
                     pass
 
-            # 2. Cek juga via /presensi/aktif-kuliah
-            if not is_open:
-                resp_a = self._api_request(
-                    "GET",
-                    "/presensi/aktif-kuliah",
-                    user_id=user_id,
-                    params={"kuliah": kuliah_id, "jenis_schema": schema},
-                )
-                if resp_a and resp_a.status_code == 200:
-                    try:
-                        data_a = resp_a.json()
-                        if isinstance(data_a, list) and data_a:
-                            is_open = True
-                            if not key and isinstance(data_a[0], dict):
-                                key = data_a[0].get("key", "")
-                                minggu_val = data_a[0].get("minggu") or data_a[0].get("pertemuan") or "-"
-                                minggu = str(minggu_val)
-                                jam_val = data_a[0].get("jam_buka") or data_a[0].get("waktu_buka") or data_a[0].get("created_at")
-                                if jam_val:
-                                    if "T" in str(jam_val):
-                                        jam = str(jam_val).split("T")[1][:8]
-                                    elif " " in str(jam_val):
-                                        jam = str(jam_val).split(" ")[1][:8]
-                                    else:
-                                        jam = str(jam_val)[:8]
-                    except Exception:
-                        pass
+        if is_open and key:
+            return {
+                "mk_code": str(kuliah_id),
+                "mk_name": mk_name,
+                "kuliah": kuliah_id,
+                "jenis_schema": schema,
+                "kuliah_asal": c.get("kuliah_asal"),
+                "key": key,
+                "dosen": c.get("dosen", "-"),
+                "jam": jam,
+                "minggu": minggu,
+                "category": "presensi",
+            }
+        return None
 
-            if is_open and key:
-                active_sessions.append(
-                    {
-                        "mk_code": str(kuliah_id),
-                        "mk_name": mk_name,
-                        "kuliah": kuliah_id,
-                        "jenis_schema": schema,
-                        "kuliah_asal": c.get("kuliah_asal"),
-                        "key": key,
-                        "dosen": c.get("dosen", "-"),
-                        "jam": jam,
-                        "minggu": minggu,
-                        "category": "presensi",
-                    }
-                )
+    def fetch_presensi_active(self, user_id: int) -> List[Dict[str, Any]]:
+        """Mendeteksi sesi presensi yang sedang terbuka untuk diabsen oleh pengguna secara paralel."""
+        courses = self.fetch_matkul(user_id)
+        if not courses:
+            return []
+
+        active_sessions: List[Dict[str, Any]] = []
+
+        max_workers = min(len(courses), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(self._check_single_course_presensi, user_id, c) for c in courses]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    res = future.result()
+                    if res:
+                        active_sessions.append(res)
+                except Exception:
+                    pass
+
+        return active_sessions
 
         return active_sessions
 
