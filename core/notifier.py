@@ -394,20 +394,20 @@ class Notifier:
                 f"<b>Minggu:</b> {html.escape(minggu_val)}"
             )
 
-            # WhatsApp (Sesuai format: Presensi dibuka ❗, Matkul, Waktu, Minggu)
+            # WhatsApp (plain text, tanpa HTML)
             wa_msg = (
-                "📢 <b>Presensi dibuka ❗</b>\n"
+                "📢 Presensi dibuka ❗\n\n"
                 f"Matkul: {mk_name}\n"
                 f"Waktu: {jam}\n"
                 f"Minggu: {minggu_val}"
             )
 
-            # Discord
+            # Discord (markdown)
             discord_msg = (
-                "Presensi dibuka ❗\n"
+                "📢 Presensi dibuka ❗\n\n"
                 f"Matkul: {mk_name}\n"
                 f"Waktu: {jam}\n"
-                f"Minggu: {minggu_val}\n\n@all"
+                f"Minggu: {minggu_val}"
             )
 
             tg_success = await self.send_text(chat_id, tg_msg)
@@ -601,10 +601,9 @@ class Notifier:
                 f"<b>Waktu:</b> {now_str}"
             )
             wa_text = (
-                "📢 <b>Presensi dibuka ❗</b>\n\n"
-                f"*Matkul:* {mk_name}\n"
-                f"*Waktu:* {now_str}"
-                f"Minggu: {minggu_val}"
+                "✅ Presensi Berhasil Dicatat !!!\n\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {now_str}"
             )
             discord_text = (
                 "✅ **Presensi Berhasil Dicatat !!!**\n\n"
@@ -714,7 +713,7 @@ class Notifier:
         # 2. WhatsApp
         if target_platform in ("all", "whatsapp"):
             wa_msg = (
-                "Presensi dibuka ❗\n"
+                "📢 Presensi dibuka ❗\n\n"
                 f"Matkul: {mk_name}\n"
                 f"Waktu: {jam}\n"
                 f"Minggu: {minggu_val}"
@@ -733,10 +732,10 @@ class Notifier:
         # 3. Discord
         if target_platform in ("all", "discord"):
             discord_msg = (
-                "Presensi dibuka ❗\n"
+                "📢 Presensi dibuka ❗\n\n"
                 f"Matkul: {mk_name}\n"
                 f"Waktu: {jam}\n"
-                f"Minggu: {minggu_val}\n\n@all"
+                f"Minggu: {minggu_val}"
             )
             if discord_target_id and self.discord_client:
                 try:
