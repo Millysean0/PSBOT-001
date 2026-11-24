@@ -413,13 +413,14 @@ class WhatsAppManager:
                     self._send_reply_sync(chat_jid, res_text)
                 else:
                     last_err = get_last_skem_error()
-                    if last_err and ("termux" in last_err.lower() or "chromium" in last_err.lower() or "node" in last_err.lower()):
+                    if last_err and ("termux" in last_err.lower() or "chromium" in last_err.lower() or "node" in last_err.lower() or "headless" in last_err.lower()):
                         self._send_reply_sync(
                             chat_jid,
-                            f"⚠️ *Kendala Browser Chromium di Termux*\n\n"
-                            f"{last_err}\n\n"
-                            f"💡 Silakan periksa langsung via browser HP:\n"
-                            f"https://pens.id/skem-monitor-pjj"
+                            f"⚠️ *Fitur SKEM Belum Tersedia di Termux*\n\n"
+                            f"Fitur scraping SKEM otomatis saat ini belum dapat bekerja di lingkungan Android/Termux karena keterbatasan browser headless.\n\n"
+                            f"💡 Silakan akses langsung portal SKEM melalui browser HP:\n"
+                            f"• PJJ: https://pens.id/skem-monitor-pjj\n"
+                            f"• Reguler: https://datastudio.google.com/reporting/46a9b1ac-1c35-4cfb-9404-a90fddbb1059/page/p_karkepf7xd"
                         )
                     else:
                         self._send_reply_sync(

@@ -28,6 +28,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from core.database import DatabaseManager
+from core.discord_bot import DiscordManager
 from core.ethol_client import EtholClient
 from core.filter_engine import FilterEngine
 from core.notifier import Notifier
@@ -182,6 +183,12 @@ async def post_init(application: Application) -> None:
         wa_manager.start()
         logger.info("WhatsAppManager aktif.")
 
+    # Jalankan Discord Bot jika diaktifkan
+    discord_manager: Optional[DiscordManager] = application.bot_data.get("discord_manager")
+    if discord_manager:
+        asyncio.create_task(discord_manager.start_bot())
+        logger.info("Discord Bot background service dijalankan.")
+
     logger.info("PSBOT-001 berhasil berjalan lancar!")
 
 
@@ -197,6 +204,10 @@ async def post_shutdown(application: Application) -> None:
     wa_manager: Optional[WhatsAppManager] = application.bot_data.get("wa_manager")
     if wa_manager:
         wa_manager.stop()
+
+    discord_manager: Optional[DiscordManager] = application.bot_data.get("discord_manager")
+    if discord_manager:
+        await discord_manager.stop_bot()
 
     logger.info("Graceful shutdown selesai.")
 
@@ -286,6 +297,35 @@ def main() -> None:
     client = EtholClient("config.json")
     filter_engine = FilterEngine("config.json")
 
+    # Inisialisasi Discord Bot jika diaktifkan
+    discord_cfg = bot_cfg.get("discord", {})
+    discord_feature_enabled = bool(features_cfg.get("discord_sync_enabled", True)) and bool(discord_cfg.get("enabled", True))
+    env_discord_enable = os.getenv("ENABLE_DISCORD", "true").strip().lower() in ("true", "1", "yes")
+    discord_token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+    discord_channel_id = os.getenv("DISCORD_CHANNEL_ID", "").strip() or discord_cfg.get("channel_id", "")
+
+    discord_manager: Optional[DiscordManager] = None
+    if discord_feature_enabled and env_discord_enable and discord_token and "YOUR_DISCORD_BOT_TOKEN" not in discord_token:
+        try:
+            discord_manager = DiscordManager(
+                token=discord_token,
+                db=db,
+                client=client,
+                default_channel_id=discord_channel_id or None,
+                command_prefix=discord_cfg.get("command_prefix", "!"),
+                status_activity=discord_cfg.get("status_activity", "ETHOL PENS Academic"),
+                admin_user_id=admin_user_id,
+            )
+            logger.info("Discord Bot terkonfigurasi (Prefix: '%s').", discord_cfg.get("command_prefix", "!"))
+        except Exception as exc:
+            logger.error("Gagal inisialisasi Discord Bot: %s", exc)
+            discord_manager = None
+    else:
+        if not discord_token or "YOUR_DISCORD_BOT_TOKEN" in discord_token:
+            logger.info("Discord Bot dinonaktifkan (DISCORD_BOT_TOKEN belum diset di .env).")
+        else:
+            logger.info("Discord Bot dinonaktifkan via config.json (discord_sync_enabled=false).")
+
     # Bangun Telegram application dengan konfigurasi timeout yang tangguh terhadap lonjakan jaringan
     tg_request = HTTPXRequest(
         connect_timeout=20.0,
@@ -310,6 +350,7 @@ def main() -> None:
         wa_client=wa_manager,
         ethol_client=client,
         config_path="config.json",
+        discord_client=discord_manager,
     )
     if wa_manager:
         wa_manager.tg_notifier = notifier
@@ -328,6 +369,7 @@ def main() -> None:
     application.bot_data["notifier"] = notifier
     application.bot_data["scheduler"] = scheduler
     application.bot_data["wa_manager"] = wa_manager
+    application.bot_data["discord_manager"] = discord_manager
     application.bot_data["admin_user_id"] = admin_user_id
     application.bot_data["start_time"] = time.time()
 

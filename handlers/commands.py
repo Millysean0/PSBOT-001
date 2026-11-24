@@ -1291,12 +1291,11 @@ async def cmd_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         f"👉 <code>{code}</code> 👈\n"
         "⏱️ <i>Masa berlaku: 10 menit</i>\n\n"
         "📝 <b>Cara Menghubungkannya:</b>\n"
-        "1. Salin kode di atas atau gunakan format perintah:\n"
-        f"   <code>-connect {code}</code>\n"
-        "2. Kirim pesan tersebut ke nomor WhatsApp bot (atau ke grup tempat bot berada).\n"
-        "3. Selesai! Kamu akan langsung mendapat notif konfirmasi.\n\n"
+        "• <b>WhatsApp:</b> Kirim <code>-connect " + code + "</code> ke nomor bot / grup WA.\n"
+        "• <b>Discord:</b> Ketik <code>!connect " + code + "</code> di channel server / DM bot Discord.\n\n"
+        "⏱️ <i>Selesai! Kamu akan langsung mendapat notif konfirmasi begitu terhubung.</i>\n\n"
         f"{links_info}"
-        "💡 <i>Setelah terhubung, bot akan kirim notif tugas baru, materi kuliah, auto-absen, dan update SKEM langsung ke WhatsApp-mu!</i>\n"
+        "💡 <i>Setelah terhubung, bot akan kirim notif tugas baru, materi kuliah, auto-absen, dan update ke WhatsApp & Discord secara realtime!</i>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "Ketik <code>/disconnect</code> jika ingin memutus tautan WhatsApp kapan saja."
     )
@@ -1373,7 +1372,9 @@ async def cmd_skem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"• <code>/skem list</code> → Lihat daftar NRP yang sedang dipantau\n"
             f"• <code>/skem stop &lt;NRP&gt;</code> → Berhenti memantau NRP\n"
             f"{hint_str}\n"
-            f"<i>Mendukung mahasiswa PJJ maupun Reguler secara otomatis.</i>",
+            f"<i>Mendukung mahasiswa PJJ maupun Reguler secara otomatis.</i>\n\n"
+            f"⚠️ <i><b>Catatan Termux/Android:</b> Fitur scraping otomatis SKEM saat ini belum dapat bekerja di Termux Android karena keterbatasan browser headless di OS Android. Anda dapat membuka portal SKEM langsung melalui browser HP:</i>\n"
+            f"🔗 <a href='https://pens.id/skem-monitor-pjj'>Portal SKEM PJJ</a> | <a href='https://datastudio.google.com/reporting/46a9b1ac-1c35-4cfb-9404-a90fddbb1059/page/p_karkepf7xd'>Portal Reguler</a>",
             parse_mode=ParseMode.HTML,
         )
         return

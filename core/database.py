@@ -221,6 +221,21 @@ class DatabaseManager:
                 """
             )
 
+            # 9. Tabel Tautan Discord Pengguna / Channel
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_discord_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    discord_target_id TEXT NOT NULL,
+                    target_type TEXT NOT NULL DEFAULT 'channel',
+                    guild_id TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    UNIQUE(user_id, discord_target_id)
+                );
+                """
+            )
+
             # Indeks performa
             conn.execute("CREATE INDEX IF NOT EXISTS idx_users_active ON users (is_logged_in, is_paused);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_seen_notif_time ON seen_notifications (created_at);")
@@ -228,6 +243,8 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_wa_links_user ON user_whatsapp_links (user_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_wa_links_chat ON user_whatsapp_links (wa_chat_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_wa_codes_exp ON wa_connect_codes (expires_at);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_discord_links_user ON user_discord_links (user_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_discord_links_target ON user_discord_links (discord_target_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skem_user ON skem_monitors (user_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_submitted_task_user ON submitted_task_tracking (user_id);")
 
@@ -780,6 +797,81 @@ class DatabaseManager:
         now = time.time()
         with self.get_connection() as conn:
             conn.execute("DELETE FROM wa_connect_codes WHERE expires_at < ?;", (now,))
+
+    # =========================================================================
+    # Integrasi Discord (Tautan Channel & User)
+    # =========================================================================
+
+    def link_user_discord(
+        self,
+        user_id: int,
+        discord_target_id: str,
+        target_type: str = "channel",
+        guild_id: str = "",
+    ) -> None:
+        """Menautkan target ID Discord (channel_id atau user_id) ke user_id tertentu."""
+        now_str = datetime.now().isoformat()
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_discord_links (user_id, discord_target_id, target_type, guild_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, discord_target_id) DO UPDATE SET
+                    target_type = excluded.target_type,
+                    guild_id = excluded.guild_id,
+                    created_at = excluded.created_at;
+                """,
+                (user_id, str(discord_target_id).strip(), target_type, str(guild_id).strip(), now_str),
+            )
+
+    def get_user_discord_targets(self, user_id: int) -> List[Dict[str, Any]]:
+        """Mengambil semua discord_target_id yang tertaut ke akun user_id."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM user_discord_links WHERE user_id = ? ORDER BY id DESC;",
+                (user_id,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_user_by_discord_target(self, discord_target_id: str) -> Optional[int]:
+        """Mengambil user_id ETHOL berdasarkan discord_target_id (channel atau DM)."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT user_id FROM user_discord_links WHERE discord_target_id = ? LIMIT 1;",
+                (str(discord_target_id).strip(),),
+            )
+            row = cursor.fetchone()
+            return int(row["user_id"]) if row else None
+
+    def unlink_user_discord(self, user_id: int, discord_target_id: Optional[str] = None) -> int:
+        """Memutus tautan Discord milik user."""
+        with self.get_connection() as conn:
+            if discord_target_id:
+                cursor = conn.execute(
+                    "DELETE FROM user_discord_links WHERE user_id = ? AND discord_target_id = ?;",
+                    (user_id, str(discord_target_id).strip()),
+                )
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM user_discord_links WHERE user_id = ?;",
+                    (user_id,),
+                )
+            return cursor.rowcount
+
+    def unlink_by_discord_target_id(self, discord_target_id: str) -> int:
+        """Memutus tautan berdasarkan discord_target_id."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM user_discord_links WHERE discord_target_id = ?;",
+                (str(discord_target_id).strip(),),
+            )
+            return cursor.rowcount
+
+    def get_all_linked_discord_targets(self) -> List[Dict[str, Any]]:
+        """Mengambil seluruh tautan Discord yang terdaftar di bot."""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM user_discord_links ORDER BY id DESC;")
+            return [dict(row) for row in cursor.fetchall()]
 
     # =========================================================================
     # Operasi SKEM Monitor

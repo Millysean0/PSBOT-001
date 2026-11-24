@@ -193,6 +193,15 @@ def _scrape_portal(url: str, nrp: str) -> Optional[Dict[str, Any]]:
     global _last_skem_error
     _last_skem_error = None
 
+    is_termux = os.path.exists("/data/data/com.termux") or os.path.exists("/data/data/com.termux/files")
+    if is_termux:
+        _last_skem_error = (
+            "Fitur monitor SKEM otomatis belum dapat bekerja di lingkungan Android/Termux "
+            "karena keterbatasan browser headless & arsitektur Android. Silakan akses portal secara langsung di browser HP."
+        )
+        logger.warning("[SKEM] %s", _last_skem_error)
+        return None
+
     if not _check_playwright_available():
         _last_skem_error = "Playwright belum terpasang. Jalankan: pip install playwright"
         logger.error("[SKEM] %s", _last_skem_error)

@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Architecture-Multi--User%20SQLite%20WAL-purple.svg" alt="Architecture">
 </p>
 
-**PSBOT-001** adalah bot asisten akademik cerdas berbasis **Telegram** dan **WhatsApp** yang terintegrasi langsung dengan portal pembelajaran **ETHOL PENS** (*EEPIS Online Learning*) dan portal pemantauan **SKEM** (*Sistem Kredit Kegiatan Mahasiswa*) Politeknik Elektronika Negeri Surabaya.
+**PSBOT-001** adalah bot asisten akademik cerdas berbasis **Telegram**, **WhatsApp**, dan **Discord** yang terintegrasi langsung dengan portal pembelajaran **ETHOL PENS** (*EEPIS Online Learning*) dan portal pemantauan **SKEM** (*Sistem Kredit Kegiatan Mahasiswa*) Politeknik Elektronika Negeri Surabaya.
 
 Bot ini dirancang dengan arsitektur multi-user yang hemat sumber daya (RAM < 150 MB), mendukung autentikasi resmi **CAS SSO (login.pens.ac.id)**, enkripsi kredensial **Fernet AES**, dan sinkronisasi lintas platform secara *real-time*.
 
@@ -16,26 +16,31 @@ Bot ini dirancang dengan arsitektur multi-user yang hemat sumber daya (RAM < 150
 
 ## 🚀 Fitur Utama
 
-### 1. Sinkronisasi Notifier ETHOL (Telegram & WhatsApp)
+### 1. Sinkronisasi Notifier ETHOL (Telegram, WhatsApp & Discord)
 - **Notifikasi Presensi / Absen Dibuka**: Menampilkan mata kuliah, jam dibuka, dan minggu ke berapa.
 - **Notifikasi Materi Baru**: Mengumumkan penambahan materi kuliah dan bahan ajar.
 - **Notifikasi Tugas Baru**: Mengabarkan tugas perkuliahan, deskripsi, dan tenggat waktu (*deadline*).
 - **Notifikasi Tugas Dikumpulkan**: Mengonfirmasi saat tugas telah berhasil dikumpulkan oleh mahasiswa.
-- **Mention `@all` Cerdas**: Tagar `@all` otomatis disematkan hanya ketika notifikasi presensi dikirimkan ke grup WhatsApp, dan ditiadakan pada chat pribadi untuk kenyamanan pengguna.
+- **Mention `@all` / `@everyone` Cerdas**: Tagar mention otomatis disematkan hanya ketika notifikasi presensi dikirimkan ke grup/channel server, dan ditiadakan pada chat pribadi untuk kenyamanan pengguna.
 
 ### 2. Auto-Download Dokumen & File Lampiran
-- **File Materi Kuliah**: Otomatis mengunduh dokumen materi (PDF, PPT, DOCX, ZIP) dari ETHOL dan mengirimkannya langsung ke Telegram dan WhatsApp pengguna.
+- **File Materi Kuliah**: Otomatis mengunduh dokumen materi (PDF, PPT, DOCX, ZIP) dari ETHOL dan mengirimkannya langsung ke Telegram, WhatsApp, dan Discord.
 - **Lampiran Soal Tugas**: Mengunduh berkas petunjuk atau lampiran soal tugas saat ada tugas baru.
 - **Berkas Tugas yang Dikumpulkan**: Otomatis mengunduh dan mencadangkan file jawaban yang baru saja diunggah ke portal ETHOL.
 
 ### 3. Pemantau SKEM Real-time (PJJ & Reguler)
 - Mendukung pemantauan riwayat ajuan SKEM untuk **Mahasiswa PJJ** (`pens.id/skem-monitor-pjj`) maupun **Mahasiswa Reguler** (`Google Looker Studio Portal`).
-- **Deteksi Otomatis (Auto-Detection)**: Bot secara cerdas mencari NRP mahasiswa di kedua portal portal tanpa perlu input rumit.
+- **Deteksi Otomatis (Auto-Detection)**: Bot secara cerdas mencari NRP mahasiswa di kedua portal tanpa perlu input rumit.
 - **Notifikasi Status**: Memberikan pembaruan seketika saat form ajuan baru terdeteksi, atau ketika ajuan disetujui/diterima maupun ditolak oleh tim kemahasiswaan.
+- *Catatan Termux:* Fitur scraping otomatis SKEM di lingkungan Android Termux belum didukung karena keterbatasan browser headless di OS Android. Pengguna di Termux diarahkan membuka langsung link Looker Studio via browser HP.
 
-### 4. Konfigurasi Fleksibel via `config.json`
+### 4. Integrasi Multi-Platform Cerdas (Telegram + WhatsApp + Discord)
+- Hubungkan akun Telegram Anda ke WhatsApp atau channel Discord dengan 1 kali ketik via perintah `/connect` (mendapatkan kode `ETH-XXXXXX`).
+- Bot Discord mendukung perintah lengkap: `!help`, `!connect`, `!matkul`, `!tugas`, `!deadline`, `!absen`, `!status`, `!ping`, dan `!login`.
+
+### 5. Konfigurasi Fleksibel via `config.json` & `.env`
 - Pengaturan non-rahasia dipisahkan dari `.env` ke `config.json`.
-- Pengguna dapat mengaktifkan atau menonaktifkan fitur sinkronisasi WhatsApp, auto-download materi, auto-download tugas, dan interval polling hanya dengan mengubah nilai `true`/`false`.
+- Pengguna dapat mengaktifkan atau menonaktifkan fitur sinkronisasi WhatsApp, Discord, auto-download materi, auto-download tugas, dan interval polling hanya dengan mengubah nilai `true`/`false`.
 
 ---
 
@@ -46,9 +51,10 @@ PSBOT-001/
 ├── core/
 │   ├── __init__.py
 │   ├── database.py         # Multi-user SQLite WAL database manager
+│   ├── discord_bot.py      # Integrasi Bot Discord (commands & notification dispatcher)
 │   ├── ethol_client.py     # HTTP Client CAS SSO + ETHOL REST API
 │   ├── filter_engine.py    # Deduplikasi hash 24 jam & blacklist filter
-│   ├── notifier.py         # Dispatcher pesan & file ke Telegram & WhatsApp
+│   ├── notifier.py         # Dispatcher pesan & file ke Telegram, WhatsApp & Discord
 │   ├── scheduler.py        # Background task scheduler (APScheduler)
 │   ├── skem_monitor.py     # Scraper portal SKEM (PJJ & Reguler via Playwright)
 │   └── whatsapp.py         # Python bridge controller ke Baileys
@@ -86,7 +92,7 @@ PSBOT-001/
 
 1. **Clone repositori atau unduh source code**:
    ```powershell
-   git clone https://github.com/username/PSBOT-001.git
+   git clone https://github.com/Millysean0/PSBOT-001.git
    cd PSBOT-001
    ```
 

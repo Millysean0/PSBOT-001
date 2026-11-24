@@ -6,6 +6,7 @@
   },
   "features": {
     "whatsapp_sync_enabled": true,
+    "discord_sync_enabled": true,
     "auto_download_materi": true,
     "auto_download_tugas": true,
     "auto_download_submitted_task": true,
@@ -36,5 +37,12 @@
   "whatsapp": {
     "backend": "baileys",
     "session_dir": "wa_session"
+  },
+  "discord": {
+    "enabled": true,
+    "command_prefix": "!",
+    "channel_id": "",
+    "guild_id": "",
+    "status_activity": "ETHOL PENS Academic Assistant"
   }
 }

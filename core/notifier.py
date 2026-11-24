@@ -39,6 +39,7 @@ class Notifier:
         wa_client: Optional[Any] = None,
         ethol_client: Optional[Any] = None,
         config_path: str = "config.json",
+        discord_client: Optional[Any] = None,
     ) -> None:
         """Inisialisasi Notifier."""
         self.bot = bot
@@ -46,6 +47,7 @@ class Notifier:
         self.wa_client = wa_client
         self.ethol_client = ethol_client
         self.config_path = config_path
+        self.discord_client = discord_client
         self.global_sent_count: int = 0
         self._load_features()
 
@@ -53,6 +55,7 @@ class Notifier:
         """Memuat preferensi fitur dari config.json."""
         self.features: Dict[str, Any] = {
             "whatsapp_sync_enabled": True,
+            "discord_sync_enabled": True,
             "auto_download_materi": True,
             "auto_download_tugas": True,
             "auto_download_submitted_task": True,
@@ -209,6 +212,79 @@ class Notifier:
             except Exception as exc:
                 logger.error("Gagal kirim file WhatsApp ke %s: %s", chat, exc)
 
+    async def _send_to_discord(
+        self,
+        user_id: int,
+        message: str,
+        embed: Optional[Any] = None,
+        is_absen: bool = False,
+    ) -> None:
+        """Mengirim pesan announcement atau embed ke channel/DM Discord yang tertaut."""
+        if not self.features.get("discord_sync_enabled", True):
+            return
+
+        if not self.discord_client or not self.discord_client.is_connected:
+            return
+
+        targets: List[str] = []
+        if self.db:
+            linked = self.db.get_user_discord_targets(user_id)
+            targets = [str(item["discord_target_id"]) for item in linked if item.get("discord_target_id")]
+
+        # Jika tidak ada target spesifik tapi ada default_channel_id global
+        if not targets and getattr(self.discord_client, "default_channel_id", None):
+            targets.append(str(self.discord_client.default_channel_id))
+
+        if not targets:
+            return
+
+        for tid in targets:
+            try:
+                await self.discord_client.send_announcement(
+                    target_id=tid,
+                    content=message,
+                    embed=embed,
+                    is_absen=is_absen,
+                )
+            except Exception as exc:
+                logger.error("Gagal broadcast Discord ke %s: %s", tid, exc)
+
+    async def _send_file_to_discord(
+        self,
+        user_id: int,
+        file_bytes: bytes,
+        filename: str,
+        caption: str = "",
+    ) -> None:
+        """Mengirim file/dokumen ke channel/DM Discord yang tertaut."""
+        if not self.features.get("discord_sync_enabled", True):
+            return
+
+        if not self.discord_client or not self.discord_client.is_connected:
+            return
+
+        targets: List[str] = []
+        if self.db:
+            linked = self.db.get_user_discord_targets(user_id)
+            targets = [str(item["discord_target_id"]) for item in linked if item.get("discord_target_id")]
+
+        if not targets and getattr(self.discord_client, "default_channel_id", None):
+            targets.append(str(self.discord_client.default_channel_id))
+
+        if not targets:
+            return
+
+        for tid in targets:
+            try:
+                await self.discord_client.send_file(
+                    target_id=tid,
+                    file_bytes=file_bytes,
+                    filename=filename,
+                    caption=caption,
+                )
+            except Exception as exc:
+                logger.error("Gagal kirim file Discord ke %s: %s", tid, exc)
+
     async def notify_item(
         self,
         chat_id: int,
@@ -264,6 +340,17 @@ class Notifier:
             if send_to_wa and wa_msg:
                 await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
 
+            # Discord
+            discord_msg = (
+                "📝 **Tugas Baru ditambahkan !!!**\n\n"
+                f"**Matkul:** {matkul}\n"
+                f"**Judul:** {judul}\n"
+                f"**Deskripsi:**\n{deskripsi if deskripsi else '(Tidak ada deskripsi tambahan)'}"
+            )
+            if deadline and deadline != "-":
+                discord_msg += f"\n\n⏰ **Batas Pengumpulan:** {deadline}"
+            await self._send_to_discord(chat_id, discord_msg.strip(), is_absen=False)
+
             # Auto-download & kirim file lampiran langsung jika diaktifkan di config
             if self.features.get("auto_download_tugas", True):
                 file_sent_count = 0
@@ -279,8 +366,10 @@ class Notifier:
                                 fname, fbytes = result
                                 cap_tg = f"📎 <b>Lampiran:</b> {html.escape(fname)}\n📌 <i>{html.escape(judul)}</i>"
                                 cap_wa = f"📎 *Lampiran:* {fname}\n📌 _{judul}_"
+                                cap_discord = f"📎 **Lampiran:** {fname}\n📌 *{judul}*"
                                 await self.send_document(chat_id, fbytes, fname, cap_tg)
                                 await self._send_file_to_whatsapp(chat_id, fbytes, fname, cap_wa)
+                                await self._send_file_to_discord(chat_id, fbytes, fname, cap_discord)
                                 file_sent_count += 1
                         except Exception as exc:
                             logger.error("[User %s] Gagal kirim lampiran tugas %s: %s", chat_id, f_name, exc)
@@ -313,9 +402,18 @@ class Notifier:
                 f"Minggu: {minggu_val}"
             )
 
+            # Discord
+            discord_msg = (
+                "Presensi dibuka ❗\n"
+                f"Matkul: {mk_name}\n"
+                f"Waktu: {jam}\n"
+                f"Minggu: {minggu_val}\n\n@all"
+            )
+
             tg_success = await self.send_text(chat_id, tg_msg)
             if wa_msg:
                 await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=True)
+            await self._send_to_discord(chat_id, discord_msg.strip(), is_absen=True)
 
             return tg_success
 
@@ -338,9 +436,17 @@ class Notifier:
                 f"*Materi:* {judul}"
             )
 
+            # Discord
+            discord_msg = (
+                "📚 **Materi baru ditambahkan !!!**\n\n"
+                f"**Matkul:** {matkul}\n"
+                f"**Materi:** {judul}"
+            )
+
             tg_success = await self.send_text(chat_id, tg_msg)
             if wa_msg:
                 await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
+            await self._send_to_discord(chat_id, discord_msg.strip(), is_absen=False)
 
             # Auto-download & kirim file materi langsung jika diaktifkan di config
             if self.features.get("auto_download_materi", True):
@@ -352,8 +458,10 @@ class Notifier:
                             fname, fbytes = result
                             cap_tg = f"📄 <b>Materi:</b> {html.escape(judul)}\n📖 <i>{html.escape(matkul)}</i>"
                             cap_wa = f"📄 *Materi:* {judul}\n📖 _{matkul}_"
+                            cap_discord = f"📄 **Materi:** {judul}\n📖 *{matkul}*"
                             await self.send_document(chat_id, fbytes, fname, cap_tg)
                             await self._send_file_to_whatsapp(chat_id, fbytes, fname, cap_wa)
+                            await self._send_file_to_discord(chat_id, fbytes, fname, cap_discord)
                             file_downloaded = True
                     except Exception as exc:
                         logger.error("[User %s] Gagal kirim file materi %s: %s", chat_id, judul, exc)
@@ -381,6 +489,14 @@ class Notifier:
             if time_str:
                 tg_msg += f"\n<b>Waktu:</b> {html.escape(time_str)}"
 
+            discord_msg = (
+                f"{icon} **{notif_label}**\n\n"
+                f"**Judul:** {title}\n"
+                f"**Detail:** {body}"
+            )
+            if time_str:
+                discord_msg += f"\n**Waktu:** {time_str}"
+
             if is_task_notif:
                 wa_msg = (
                     f"{icon} *{notif_label}*\n\n"
@@ -394,6 +510,7 @@ class Notifier:
             tg_success = await self.send_text(chat_id, tg_msg)
             if send_to_wa and wa_msg:
                 await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
+            await self._send_to_discord(chat_id, discord_msg.strip(), is_absen=False)
 
             return tg_success
 
@@ -439,6 +556,16 @@ class Notifier:
         tg_success = await self.send_text(chat_id, tg_msg)
         await self._send_to_whatsapp(chat_id, wa_msg.strip(), is_absen=False)
 
+        discord_msg = (
+            "✅ **Tugas Sudah Dikumpulkan !!!**\n\n"
+            f"**Matkul:** {matkul}\n"
+            f"**Judul:** {judul}\n"
+            f"**Waktu Pengumpulan:** {waktu}"
+        )
+        if catatan:
+            discord_msg += f"\n**Catatan:** {catatan}"
+        await self._send_to_discord(chat_id, discord_msg.strip(), is_absen=False)
+
         # 2. Auto-download & kirim file jawaban jika diaktifkan di config
         if self.features.get("auto_download_submitted_task", True) and submitted_files and client:
             for f_item in submitted_files[:5]:
@@ -452,8 +579,10 @@ class Notifier:
                         fname, fbytes = result
                         cap_tg = f"📎 <b>File Jawaban:</b> {html.escape(fname)}\n📌 <i>{html.escape(judul)} ({html.escape(matkul)})</i>"
                         cap_wa = f"📎 *File Jawaban:* {fname}\n📌 _{judul} ({matkul})_"
+                        cap_discord = f"📎 **File Jawaban:** {fname}\n📌 *{judul} ({matkul})*"
                         await self.send_document(chat_id, fbytes, fname, cap_tg)
                         await self._send_file_to_whatsapp(chat_id, fbytes, fname, cap_wa)
+                        await self._send_file_to_discord(chat_id, fbytes, fname, cap_discord)
                 except Exception as exc:
                     logger.error("[User %s] Gagal kirim file jawaban tugas %s: %s", chat_id, f_name, exc)
 
@@ -476,6 +605,11 @@ class Notifier:
                 f"*Matkul:* {mk_name}\n"
                 f"*Waktu:* {now_str}"
             )
+            discord_text = (
+                "✅ **Presensi Berhasil Dicatat !!!**\n\n"
+                f"**Matkul:** {mk_name}\n"
+                f"**Waktu:** {now_str}"
+            )
         else:
             tg_text = (
                 "⚠️ <b>Presensi Gagal Dilakukan</b>\n\n"
@@ -489,9 +623,16 @@ class Notifier:
                 f"*Waktu:* {now_str}\n\n"
                 "_Silakan lakukan presensi manual di web ETHOL jika diperlukan._"
             )
+            discord_text = (
+                "⚠️ **Presensi Gagal Dilakukan**\n\n"
+                f"**Matkul:** {mk_name}\n"
+                f"**Waktu:** {now_str}\n\n"
+                "*Silakan lakukan presensi manual di web ETHOL jika diperlukan.*"
+            )
 
         tg_success = await self.send_text(chat_id, tg_text)
         await self._send_to_whatsapp(chat_id, wa_text, is_absen=False)
+        await self._send_to_discord(chat_id, discord_text, is_absen=False)
         return tg_success
 
     async def notify_skem(
@@ -503,4 +644,5 @@ class Notifier:
         """Mengirim notifikasi perubahan status SKEM ke Telegram dan WhatsApp user."""
         tg_success = await self.send_text(chat_id, tg_msg)
         await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
+        await self._send_to_discord(chat_id, wa_msg, is_absen=False)
         return tg_success
