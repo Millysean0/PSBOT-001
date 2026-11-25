@@ -23,6 +23,7 @@
   },
   "polling": {
     "ethol_poll_interval_seconds": 5,
+    "dashboard_poll_interval_seconds": 60,
     "tugas_poll_interval_seconds": 60,
     "materi_poll_interval_seconds": 120,
     "skem_poll_interval_seconds": 300,
@@ -33,7 +34,7 @@
     "base_url": "https://ethol.pens.ac.id",
     "login_url": "https://login.pens.ac.id/cas/login?service=https%3A%2F%2Fethol.pens.ac.id%2Fapi%2Fauth%2Fcas-callback",
     "cas_service_url": "https://ethol.pens.ac.id/api/auth/cas-callback",
-    "request_timeout_seconds": 8,
+    "request_timeout_seconds": 15,
     "retry_attempts": 2,
     "retry_backoff_seconds": 1
   },

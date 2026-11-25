@@ -22,12 +22,35 @@ const qrcode = require('qrcode-terminal');
 const readline = require('readline');
 const fs = require('fs');
 
+// Redam log error internal libsignal (Bad MAC / session decryption) agar tidak memenuhi konsol
+const origConsoleError = console.error;
+console.error = function (...args) {
+    const text = args.map(a => (typeof a === 'string' ? a : (a?.stack || a?.message || ''))).join(' ');
+    if (
+        text.includes('Bad MAC') ||
+        text.includes('Failed to decrypt message') ||
+        text.includes('Session error') ||
+        text.includes('Closing open session in favor of incoming prekey bundle')
+    ) {
+        return;
+    }
+    origConsoleError.apply(console, args);
+};
+
 // Konfigurasi
 const sessionDir = process.env.WA_SESSION_DIR || 'wa_session';
 const phoneNumber = (process.env.WA_PHONE_NUMBER || '').trim();
 
 let sock = null;
 let isConnected = false;
+const msgStore = new Map();
+
+async function getStoredMessage(key) {
+    if (key?.id && msgStore.has(key.id)) {
+        return msgStore.get(key.id);
+    }
+    return undefined;
+}
 
 function sendEvent(obj) {
     try {
@@ -65,7 +88,7 @@ async function startWhatsApp() {
             browser: ['PSBOT-001', 'Chrome', '124.0.0.0'],
             generateHighQualityLinkPreview: false,
             syncFullHistory: false,
-            getMessage: async () => undefined,
+            getMessage: getStoredMessage,
             shouldIgnoreJid: jid => jid.endsWith('@broadcast'),
         });
 
@@ -129,6 +152,14 @@ async function startWhatsApp() {
             if (!messages || messages.length === 0) return;
 
             for (const msg of messages) {
+                if (msg.key?.id && msg.message) {
+                    msgStore.set(msg.key.id, msg.message);
+                    if (msgStore.size > 250) {
+                        const firstKey = msgStore.keys().next().value;
+                        msgStore.delete(firstKey);
+                    }
+                }
+
                 if (!msg.message || msg.key.fromMe) continue;
 
                 const chatJid = msg.key.remoteJid;

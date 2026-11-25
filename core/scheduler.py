@@ -47,6 +47,7 @@ class BotScheduler:
         self.config_path = config_path
 
         self.poll_interval: int = 5
+        self.dashboard_poll_interval: int = 60
         self.tugas_poll_interval: int = 60
         self.materi_poll_interval: int = 120
         self.skem_poll_interval: int = 300
@@ -87,6 +88,7 @@ class BotScheduler:
                     polling = cfg.get("polling", {})
                     features = cfg.get("features", {})
                     self.poll_interval = int(polling.get("ethol_poll_interval_seconds", 5))
+                    self.dashboard_poll_interval = int(polling.get("dashboard_poll_interval_seconds", 60))
                     self.tugas_poll_interval = int(polling.get("tugas_poll_interval_seconds", 60))
                     self.materi_poll_interval = int(polling.get("materi_poll_interval_seconds", 120))
                     self.skem_poll_interval = int(polling.get("skem_poll_interval_seconds", 300))
@@ -174,7 +176,7 @@ class BotScheduler:
                     new_sent_count = 0
                     current_hash = ""
 
-                    if self.notifier.is_notif_enabled("notifikasi_umum") and (now_ts - last_dash >= 20.0):
+                    if self.notifier.is_notif_enabled("notifikasi_umum") and (now_ts - last_dash >= float(self.dashboard_poll_interval)):
                         self._last_dashboard_poll[user_id] = now_ts
                         dashboard_data = await asyncio.to_thread(self.client.fetch_dashboard, user_id)
                         current_hash = dashboard_data.get("content_hash", "")
@@ -321,33 +323,14 @@ class BotScheduler:
 
             is_seeded = self.db.has_known_items_seeded(user_id, "tugas")
             if not is_seeded:
-                seed_ids: List[str] = []
-                active_to_notify: List[Dict[str, Any]] = []
-                for t in tasks:
-                    tid = str(t.get("raw_id") or t.get("id"))
-                    is_sub = bool(t.get("is_submitted"))
-                    is_over = bool(t.get("is_overdue"))
-                    hours = int(t.get("hours_left", 9999))
-                    # Tugas aktif yang belum dikumpulkan & punya deadline mendatang langsung dinotifikasi
-                    if not is_sub and not is_over and hours < 9999:
-                        active_to_notify.append(t)
-                    else:
-                        seed_ids.append(tid)
-
+                seed_ids = [str(t.get("raw_id") or t.get("id")) for t in tasks]
                 if seed_ids:
                     self.db.mark_known_items_bulk(user_id, "tugas", seed_ids)
-
-                # Jika seluruh tugas adalah tugas lama, pastikan minimal 1 marker agar status seeded aktif
-                if not seed_ids and not active_to_notify:
-                    return
-
-                for t in active_to_notify:
-                    tid = str(t.get("raw_id") or t.get("id"))
-                    should_send, _, is_priority = self.filter_engine.should_notify_user(user_id, t, self.db)
-                    if should_send:
-                        logger.info("📝 [Poller] Tugas aktif terdeteksi: %s (%s) untuk User %s", t.get("judul"), t.get("matkul"), user_id)
-                        await self.notifier.notify_item(user_id, t, is_priority=is_priority, ethol_client=self.client)
-                    self.db.mark_known_item(user_id, "tugas", tid)
+                logger.info(
+                    "[User %s] Inisialisasi baseline %d tugas tersimpan (tugas sebelum bot nyala tidak dikirim).",
+                    user_id,
+                    len(seed_ids),
+                )
                 return
 
             for t in tasks:
@@ -355,9 +338,11 @@ class BotScheduler:
                 if self.db.is_known_item(user_id, "tugas", tid):
                     continue
 
-                # Tugas baru terdeteksi!
+                # Tandai sebagai sudah dikenal agar tidak dikirim berulang
                 self.db.mark_known_item(user_id, "tugas", tid)
-                if t.get("is_submitted"):
+
+                # Abaikan jika tugas sudah dikumpulkan atau sudah kedaluwarsa / lewat batas waktu
+                if t.get("is_submitted") or t.get("is_overdue"):
                     continue
 
                 should_send, reason, is_priority = self.filter_engine.should_notify_user(user_id, t, self.db)

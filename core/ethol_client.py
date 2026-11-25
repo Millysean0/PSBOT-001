@@ -151,7 +151,7 @@ class EtholClient:
         """Melakukan HTTP request dengan retry dan backoff untuk session pengguna."""
         raw_timeout = kwargs.pop("timeout", self.timeout)
         if isinstance(raw_timeout, (int, float)):
-            timeout = (min(4.0, float(raw_timeout)), float(raw_timeout))
+            timeout = (min(10.0, float(raw_timeout)), max(float(raw_timeout), 12.0))
         else:
             timeout = raw_timeout
 
@@ -1269,7 +1269,7 @@ class EtholClient:
 
     def fetch_dashboard(self, user_id: int) -> Dict[str, Any]:
         """Mengambil data dashboard dan notifikasi pengguna dari /api/notifikasi/mahasiswa?filterNotif=SEMUA."""
-        resp = self._api_request("GET", "/notifikasi/mahasiswa", user_id=user_id, params={"filterNotif": "SEMUA"})
+        resp = self._api_request("GET", "/notifikasi/mahasiswa", user_id=user_id, params={"filterNotif": "SEMUA"}, timeout=15, silent_error=True)
         result: Dict[str, Any] = {
             "status": "success" if resp and resp.status_code == 200 else "failed",
             "timestamp": datetime.now().isoformat(),
