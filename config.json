@@ -13,8 +13,18 @@
     "skem_monitor_enabled": true,
     "auto_absen_enabled": true
   },
+  "notifications": {
+    "absen": true,
+    "tugas": true,
+    "tugas_dikumpulkan": true,
+    "materi": true,
+    "notifikasi_umum": true,
+    "skem": true
+  },
   "polling": {
     "ethol_poll_interval_seconds": 5,
+    "tugas_poll_interval_seconds": 60,
+    "materi_poll_interval_seconds": 120,
     "skem_poll_interval_seconds": 300,
     "presensi_cooldown_seconds": 300,
     "tugas_submission_poll_interval_seconds": 300

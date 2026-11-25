@@ -221,7 +221,7 @@ class DatabaseManager:
                 """
             )
 
-            # 9. Tabel Tautan Discord Pengguna / Channel
+            # 10. Tabel Tautan Discord Pengguna / Channel
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS user_discord_links (
@@ -232,6 +232,19 @@ class DatabaseManager:
                     guild_id TEXT DEFAULT '',
                     created_at TEXT NOT NULL,
                     UNIQUE(user_id, discord_target_id)
+                );
+                """
+            )
+
+            # 11. Tabel Known Academic Items (Tugas baru / Materi baru agar tidak kedaluwarsa & tidak spam)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS known_academic_items (
+                    user_id INTEGER NOT NULL,
+                    item_type TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (user_id, item_type, item_id)
                 );
                 """
             )
@@ -247,6 +260,7 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_discord_links_target ON user_discord_links (discord_target_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skem_user ON skem_monitors (user_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_submitted_task_user ON submitted_task_tracking (user_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_known_items_user ON known_academic_items (user_id, item_type);")
 
         logger.info("Database SQLite multi-user (%s) berhasil diinisialisasi.", self.db_path)
 
@@ -968,4 +982,53 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?, ?);
                 """,
                 (user_id, str(task_id), str(submission_time), str(submission_file), now),
+            )
+
+    # =========================================================================
+    # Operasi Tracking Item Akademik Permanen (Tugas Baru & Materi Baru)
+    # =========================================================================
+
+    def has_known_items_seeded(self, user_id: int, item_type: str) -> bool:
+        """Cek apakah user sudah memiliki minimal 1 item tercatat untuk tipe tertentu."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM known_academic_items WHERE user_id = ? AND item_type = ? LIMIT 1;",
+                (user_id, str(item_type)),
+            ).fetchone()
+            return row is not None
+
+    def is_known_item(self, user_id: int, item_type: str, item_id: str) -> bool:
+        """Cek apakah tugas/materi dengan ID tersebut sudah pernah diproses."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM known_academic_items WHERE user_id = ? AND item_type = ? AND item_id = ?;",
+                (user_id, str(item_type), str(item_id)),
+            ).fetchone()
+            return row is not None
+
+    def mark_known_item(self, user_id: int, item_type: str, item_id: str) -> None:
+        """Menandai 1 item tugas/materi sebagai sudah dikenal."""
+        now = time.time()
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO known_academic_items (user_id, item_type, item_id, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (user_id, str(item_type), str(item_id), now),
+            )
+
+    def mark_known_items_bulk(self, user_id: int, item_type: str, item_ids: List[str]) -> None:
+        """Menandai banyak item tugas/materi sekaligus dalam satu transaksi."""
+        if not item_ids:
+            return
+        now = time.time()
+        rows = [(user_id, str(item_type), str(iid), now) for iid in item_ids]
+        with self.get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO known_academic_items (user_id, item_type, item_id, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                rows,
             )

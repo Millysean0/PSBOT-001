@@ -46,12 +46,16 @@ class BotScheduler:
         self.db = db
         self.config_path = config_path
 
-        self.poll_interval: int = 30
+        self.poll_interval: int = 5
+        self.tugas_poll_interval: int = 60
+        self.materi_poll_interval: int = 120
         self.skem_poll_interval: int = 300
         self.cooldown_seconds: int = 300
         self.auto_absen_enabled_global: bool = True
         self.skem_monitor_enabled: bool = True
         self._last_tugas_poll: Dict[int, float] = {}
+        self._last_new_tugas_poll: Dict[int, float] = {}
+        self._last_materi_poll: Dict[int, float] = {}
         self._last_dashboard_poll: Dict[int, float] = {}
         self._poll_lock = asyncio.Lock()
 
@@ -83,6 +87,8 @@ class BotScheduler:
                     polling = cfg.get("polling", {})
                     features = cfg.get("features", {})
                     self.poll_interval = int(polling.get("ethol_poll_interval_seconds", 5))
+                    self.tugas_poll_interval = int(polling.get("tugas_poll_interval_seconds", 60))
+                    self.materi_poll_interval = int(polling.get("materi_poll_interval_seconds", 120))
                     self.skem_poll_interval = int(polling.get("skem_poll_interval_seconds", 300))
                     self.cooldown_seconds = int(polling.get("presensi_cooldown_seconds", 300))
                     self.auto_absen_enabled_global = bool(features.get("auto_absen_enabled", True))
@@ -168,7 +174,7 @@ class BotScheduler:
                     new_sent_count = 0
                     current_hash = ""
 
-                    if now_ts - last_dash >= 20.0:
+                    if self.notifier.is_notif_enabled("notifikasi_umum") and (now_ts - last_dash >= 20.0):
                         self._last_dashboard_poll[user_id] = now_ts
                         dashboard_data = await asyncio.to_thread(self.client.fetch_dashboard, user_id)
                         current_hash = dashboard_data.get("content_hash", "")
@@ -192,8 +198,17 @@ class BotScheduler:
                     if self.auto_absen_enabled_global:
                         await self._process_user_auto_absen(user_id)
 
-                    # 5. Deteksi tugas yang baru dikumpulkan (interval 300 detik)
-                    await self._process_user_submitted_tasks(user_id)
+                    # 5. Deteksi tugas baru (interval configurable, default 60 detik)
+                    if self.notifier.is_notif_enabled("tugas"):
+                        await self._process_user_new_tasks(user_id)
+
+                    # 6. Deteksi materi baru (interval configurable, default 120 detik)
+                    if self.notifier.is_notif_enabled("materi"):
+                        await self._process_user_new_materi(user_id)
+
+                    # 7. Deteksi tugas yang baru dikumpulkan (interval 300 detik)
+                    if self.notifier.is_notif_enabled("tugas_dikumpulkan"):
+                        await self._process_user_submitted_tasks(user_id)
 
                     # 6. Update metrik polling di DB jika ada update
                     if new_sent_count or current_hash:
@@ -291,6 +306,106 @@ class BotScheduler:
                 )
                 self.db.set_presensi_cooldown(user_id, mk_code, now)
 
+    async def _process_user_new_tasks(self, user_id: int) -> None:
+        """Memeriksa tugas baru yang belum diketahui dan mengirimkan notifikasi lengkap + lampiran."""
+        now = time.time()
+        last_check = self._last_new_tugas_poll.get(user_id, 0.0)
+        if now - last_check < float(self.tugas_poll_interval):
+            return
+        self._last_new_tugas_poll[user_id] = now
+
+        try:
+            tasks = await asyncio.to_thread(self.client.fetch_tugas, user_id, True, None, True)
+            if not tasks:
+                return
+
+            is_seeded = self.db.has_known_items_seeded(user_id, "tugas")
+            if not is_seeded:
+                seed_ids: List[str] = []
+                active_to_notify: List[Dict[str, Any]] = []
+                for t in tasks:
+                    tid = str(t.get("raw_id") or t.get("id"))
+                    is_sub = bool(t.get("is_submitted"))
+                    is_over = bool(t.get("is_overdue"))
+                    hours = int(t.get("hours_left", 9999))
+                    # Tugas aktif yang belum dikumpulkan & punya deadline mendatang langsung dinotifikasi
+                    if not is_sub and not is_over and hours < 9999:
+                        active_to_notify.append(t)
+                    else:
+                        seed_ids.append(tid)
+
+                if seed_ids:
+                    self.db.mark_known_items_bulk(user_id, "tugas", seed_ids)
+
+                # Jika seluruh tugas adalah tugas lama, pastikan minimal 1 marker agar status seeded aktif
+                if not seed_ids and not active_to_notify:
+                    return
+
+                for t in active_to_notify:
+                    tid = str(t.get("raw_id") or t.get("id"))
+                    should_send, _, is_priority = self.filter_engine.should_notify_user(user_id, t, self.db)
+                    if should_send:
+                        logger.info("📝 [Poller] Tugas aktif terdeteksi: %s (%s) untuk User %s", t.get("judul"), t.get("matkul"), user_id)
+                        await self.notifier.notify_item(user_id, t, is_priority=is_priority, ethol_client=self.client)
+                    self.db.mark_known_item(user_id, "tugas", tid)
+                return
+
+            for t in tasks:
+                tid = str(t.get("raw_id") or t.get("id"))
+                if self.db.is_known_item(user_id, "tugas", tid):
+                    continue
+
+                # Tugas baru terdeteksi!
+                self.db.mark_known_item(user_id, "tugas", tid)
+                if t.get("is_submitted"):
+                    continue
+
+                should_send, reason, is_priority = self.filter_engine.should_notify_user(user_id, t, self.db)
+                if should_send:
+                    logger.info("📝 [Poller] Tugas baru terdeteksi: %s (%s) untuk User %s", t.get("judul"), t.get("matkul"), user_id)
+                    await self.notifier.notify_item(user_id, t, is_priority=is_priority, ethol_client=self.client)
+                else:
+                    logger.debug("[User %s] Tugas baru %s dilewati filter: %s", user_id, t.get("judul"), reason)
+
+        except Exception as exc:
+            logger.error("[User %s] Error deteksi tugas baru: %s", user_id, exc)
+
+    async def _process_user_new_materi(self, user_id: int) -> None:
+        """Memeriksa materi kuliah baru dan mengirimkan notifikasi + file materi."""
+        now = time.time()
+        last_check = self._last_materi_poll.get(user_id, 0.0)
+        if now - last_check < float(self.materi_poll_interval):
+            return
+        self._last_materi_poll[user_id] = now
+
+        try:
+            materials = await asyncio.to_thread(self.client.fetch_materi, user_id)
+            if not materials:
+                return
+
+            is_seeded = self.db.has_known_items_seeded(user_id, "materi")
+            if not is_seeded:
+                seed_ids = [str(m.get("raw_id") or m.get("id")) for m in materials]
+                self.db.mark_known_items_bulk(user_id, "materi", seed_ids)
+                logger.info("[User %s] Inisialisasi baseline %d materi tersimpan.", user_id, len(seed_ids))
+                return
+
+            for m in materials:
+                mid = str(m.get("raw_id") or m.get("id"))
+                if self.db.is_known_item(user_id, "materi", mid):
+                    continue
+
+                self.db.mark_known_item(user_id, "materi", mid)
+                should_send, reason, is_priority = self.filter_engine.should_notify_user(user_id, m, self.db)
+                if should_send:
+                    logger.info("📚 [Poller] Materi baru terdeteksi: %s (%s) untuk User %s", m.get("judul"), m.get("matkul"), user_id)
+                    await self.notifier.notify_item(user_id, m, is_priority=is_priority, ethol_client=self.client)
+                else:
+                    logger.debug("[User %s] Materi baru %s dilewati filter: %s", user_id, m.get("judul"), reason)
+
+        except Exception as exc:
+            logger.error("[User %s] Error deteksi materi baru: %s", user_id, exc)
+
     async def _process_user_submitted_tasks(self, user_id: int) -> None:
         """Memeriksa tugas yang baru dikumpulkan oleh mahasiswa (dibatasi interval 5 menit)."""
         now = time.time()
@@ -336,6 +451,8 @@ class BotScheduler:
 
     async def skem_poll_job(self) -> None:
         """Background job untuk polling monitoring SKEM."""
+        if not self.notifier.is_notif_enabled("skem"):
+            return
         try:
             from core.skem_monitor import (
                 detect_skem_changes,

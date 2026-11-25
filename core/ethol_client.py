@@ -941,13 +941,14 @@ class EtholClient:
         return None
 
     def fetch_materi(self, user_id: int) -> List[Dict[str, Any]]:
-        """Mengambil daftar materi kuliah pengguna dari seluruh mata kuliah aktif."""
+        """Mengambil daftar materi kuliah pengguna dari seluruh mata kuliah aktif secara paralel."""
         courses = self.fetch_matkul(user_id)
         if not courses:
             return []
 
         all_materials: List[Dict[str, Any]] = []
-        for c in courses:
+
+        def _fetch_course_materials(c: Dict[str, Any]) -> List[Dict[str, Any]]:
             kuliah_id = c["nomor"]
             schema = c.get("jenis_schema", 2)
             mk_name = c.get("nama", "Kuliah")
@@ -957,18 +958,22 @@ class EtholClient:
                 "/materi",
                 user_id=user_id,
                 params={"matakuliah": kuliah_id, "jenis_schema": schema},
+                timeout=8,
+                max_retries=1,
+                silent_error=True,
             )
             if not resp or resp.status_code != 200:
-                continue
+                return []
 
             try:
                 items = resp.json()
             except Exception:
-                continue
+                return []
 
             if not isinstance(items, list):
-                continue
+                return []
 
+            c_mats: List[Dict[str, Any]] = []
             for m in items:
                 if not isinstance(m, dict):
                     continue
@@ -977,9 +982,10 @@ class EtholClient:
                 tgl = m.get("tanggal_format") or m.get("tanggal") or "-"
                 link_file = m.get("path") or m.get("url") or ""
 
-                all_materials.append(
+                c_mats.append(
                     {
                         "id": f"materi_{m_id}",
+                        "raw_id": m_id,
                         "matkul": mk_name,
                         "dosen": c.get("dosen", "-"),
                         "judul": judul,
@@ -988,6 +994,18 @@ class EtholClient:
                         "category": "materi",
                     }
                 )
+            return c_mats
+
+        max_workers = min(len(courses), 6) if courses else 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_fetch_course_materials, c) for c in courses]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    c_res = future.result()
+                    if c_res:
+                        all_materials.extend(c_res)
+                except Exception:
+                    pass
 
         return all_materials
 

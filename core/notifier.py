@@ -52,7 +52,7 @@ class Notifier:
         self._load_features()
 
     def _load_features(self) -> None:
-        """Memuat preferensi fitur dari config.json."""
+        """Memuat preferensi fitur & jenis notifikasi aktif dari config.json."""
         self.features: Dict[str, Any] = {
             "whatsapp_sync_enabled": True,
             "discord_sync_enabled": True,
@@ -60,13 +60,41 @@ class Notifier:
             "auto_download_tugas": True,
             "auto_download_submitted_task": True,
         }
+        self.notifications_cfg: Dict[str, bool] = {
+            "absen": True,
+            "tugas": True,
+            "tugas_dikumpulkan": True,
+            "materi": True,
+            "notifikasi_umum": True,
+            "skem": True,
+        }
         try:
             if os.path.exists(self.config_path):
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                     self.features.update(cfg.get("features", {}))
+                    notif_section = cfg.get("notifications", {})
+                    if isinstance(notif_section, dict):
+                        for k, v in notif_section.items():
+                            self.notifications_cfg[str(k).lower()] = bool(v)
         except Exception as exc:
-            logger.warning("Gagal memuat config features di Notifier: %s", exc)
+            logger.warning("Gagal memuat config features/notifications di Notifier: %s", exc)
+
+    def is_notif_enabled(self, notif_type: str) -> bool:
+        """Memeriksa apakah jenis notifikasi tertentu diaktifkan di config.json."""
+        key = str(notif_type).lower().strip()
+        alias_map = {
+            "presensi": "absen",
+            "absen": "absen",
+            "tugas": "tugas",
+            "tugas_dikumpulkan": "tugas_dikumpulkan",
+            "materi": "materi",
+            "notifikasi": "notifikasi_umum",
+            "notifikasi_umum": "notifikasi_umum",
+            "skem": "skem",
+        }
+        cfg_key = alias_map.get(key, key)
+        return bool(self.notifications_cfg.get(cfg_key, True))
 
     @staticmethod
     def split_message(text: str, max_length: int = 4000) -> List[str]:
@@ -301,6 +329,10 @@ class Notifier:
         """
         client = ethol_client or self.ethol_client
         category = item.get("category", "notifikasi").lower()
+        if not self.is_notif_enabled(category):
+            logger.debug("[User %s] Notifier kategori '%s' dinonaktifkan di config.json.", chat_id, category)
+            return False
+
         tg_msg = ""
         wa_msg: Optional[str] = None
         send_to_wa = False
@@ -525,6 +557,10 @@ class Notifier:
         serta otomatis mengunduh file jawaban yang dikumpulkan dan mengirimkannya
         ke Telegram dan WhatsApp langsung.
         """
+        if not self.is_notif_enabled("tugas_dikumpulkan"):
+            logger.debug("[User %s] Notifier 'tugas_dikumpulkan' dinonaktifkan di config.json.", chat_id)
+            return False
+
         client = ethol_client or self.ethol_client
         matkul = task.get("matkul", "-")
         judul = task.get("judul", "-")
@@ -598,6 +634,10 @@ class Notifier:
         minggu: Optional[str] = None,
     ) -> bool:
         """Mengirim konfirmasi hasil eksekusi presensi otomatis (sukses / gagal)."""
+        if not self.is_notif_enabled("absen"):
+            logger.debug("[User %s] Notifier 'absen' dinonaktifkan di config.json.", chat_id)
+            return False
+
         clean_mk = html.escape(mk_name)
         clean_msg = html.escape(message)
         jam_val = str(jam) if jam else datetime.now().strftime("%H:%M:%S")
@@ -657,6 +697,10 @@ class Notifier:
         wa_msg: str,
     ) -> bool:
         """Mengirim notifikasi perubahan status SKEM ke Telegram dan WhatsApp user."""
+        if not self.is_notif_enabled("skem"):
+            logger.debug("[User %s] Notifier 'skem' dinonaktifkan di config.json.", chat_id)
+            return False
+
         tg_success = await self.send_text(chat_id, tg_msg)
         await self._send_to_whatsapp(chat_id, wa_msg, is_absen=False)
         await self._send_to_discord(chat_id, wa_msg, is_absen=False)
